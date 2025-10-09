@@ -1,0 +1,10 @@
+{
+  "Steel": 9,
+  "Wind": 4,
+  "Earth": 1.0,
+  "Lightning": 1.1,
+  "Grass": 1.1,
+  "Flame": 0.05,
+  "Water": 0.01,
+  "Sun": 1
+}
