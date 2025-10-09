@@ -77,7 +77,6 @@ If an optional file is missing, **built-in defaults** are used.
 |------|-----------|-------------|--------------|--------------------|
 | `orbs.json` | ✅ Yes | `--orbs` | List of orb definitions (`type`, `set`, `rarity`, `value`, etc.). | Must exist. |
 | `slots.json` | ✅ Yes | `--slots` | Defines rarity categories and their slot counts. | Must exist. |
-| `weights.json` | ❌ Optional | `--weights` | Overrides set preference multipliers. | Falls back to `DEFAULT_SET_WEIGHTS`. |
 | `orb_weights.json` | ❌ Optional | `--orb-weights` | Adjusts orb type importance. | Falls back to `DEFAULT_ORB_TYPE_WEIGHTS`. |
 | `orb_levels.json` | ❌ Optional | `--orb-levels` | Defines rarity → max level caps. | Falls back to `DEFAULT_LEVEL_CAPS`. |
 | `orb_level_weights.json` | ❌ Optional | `--orb-level-weights` | Defines additive bonus per tier. | Falls back to `DEFAULT_ORB_LEVEL_WEIGHTS`. |
@@ -87,13 +86,13 @@ If an optional file is missing, **built-in defaults** are used.
 ### 🧠 Example CLI Usage
 
 ```bash
-orb-optimize optimize --orbs ./data/orbs.json --slots ./data/slots.json --weights ./data/weights.json --orb-weights ./data/orb_weights.json --orb-levels ./data/orb_levels.json --orb-level-weights ./data/orb_level_weights.json
+orb-optimize optimize --orbs ./data/orbs.json --slots ./data/slots.json --orb-weights ./data/orb_weights.json --orb-levels ./data/orb_levels.json --orb-level-weights ./data/orb_level_weights.json
 ```
 
 Or rely on built-in defaults:
 
 ```bash
-orb-optimize optimize --orbs ./orbs.json --slots ./slots.json
+orb-optimize optimize --orbs ./data/orbs.json --slots ./data/slots.json
 ```
 
 When optional files are missing, the optimizer logs a ⚠️ warning and uses defaults from `data_loader.py`.
