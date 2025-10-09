@@ -6,7 +6,11 @@ A tool for calculating the **optimal orb loadout** in the mobile game The Demoni
 
 ### 🚀 Setup
 
-First, install `uv` globally (if you haven’t already):
+First, download and install python. `3.11.X` python is required
+
+Download python [here](https://www.python.org/downloads/release/python-3119/) 
+
+Then, install `uv` globally (if you haven’t already):
 
 ```bash
 # macOS (Homebrew)
