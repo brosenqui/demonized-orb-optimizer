@@ -296,7 +296,7 @@ class UnifiedOptimizer:
                 for state in partials_in:
                     used_ids = state["used_ids"]
 
-                    # 1) Shared-first (optional)
+                    # 1) Shared-first
                     if cat.name in self.shareable:
                         pool_map = {}
                         for lst in per_prof_lists:
@@ -483,16 +483,39 @@ class UnifiedOptimizer:
                                 if not ok:
                                     continue
 
-                            # Global inventory uniqueness across categories
-                            seen: set[int] = set()
+                            # Global inventory uniqueness across categories:
+                            # - Per profile: no reuse of the same orb across multiple categories
+                            # - Across profiles:
+                            #     * Non-shareable categories: disallow duplicates
+                            #     * Shareable categories: allow duplicates ONLY within the same category
                             ok = True
-                            for pp, cats in trial.items():
+                            per_profile_used: dict[str, set[int]] = {pp: set() for pp in trial.keys()}
+                            cross_profile_used_by_cat: dict[str, set[int]] = {c2.name: set() for c2 in self.categories}
+
+                            for pp, cats_map in trial.items():
+                                used_local = per_profile_used[pp]
+
                                 for c2 in self.categories:
-                                    ids = _orb_ids(tuple(cats[c2.name]))
-                                    if seen & ids:
+                                    ids = _orb_ids(tuple(cats_map[c2.name]))
+
+                                    # 1) Within the same profile, an orb cannot appear in two categories
+                                    if used_local & ids:
                                         ok = False
                                         break
-                                    seen |= ids
+                                    used_local |= ids
+
+                                    # 2) Across profiles
+                                    if c2.name in self.shareable:
+                                        # Shareable category: allow duplicates across profiles
+                                        # (identical sharing is allowed). No cross-profile check.
+                                        continue
+                                    else:
+                                        # Non-shareable category: disallow cross-profile duplicates
+                                        if cross_profile_used_by_cat[c2.name] & ids:
+                                            ok = False
+                                            break
+                                        cross_profile_used_by_cat[c2.name] |= ids
+
                                 if not ok:
                                     break
                             if not ok:
