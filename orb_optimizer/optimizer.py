@@ -84,7 +84,6 @@ class UnifiedOptimizer:
         profiles: list of ProfileConfig (length >= 1).
         shareable_categories: names where identical instance combos may be shared (count once).
         topk_per_category: keep only top-K combos per profile per category during expansion.
-        shared_first: if True, try identical “shared” combos first on shareable categories.
     """
 
     def __init__(
@@ -96,7 +95,6 @@ class UnifiedOptimizer:
         profiles: List[ProfileConfig],
         shareable_categories: List[str] | None = None,
         topk_per_category: int = 12,
-        shared_first: bool = True,
     ):
         if not profiles:
             raise ValueError("UnifiedOptimizer requires at least one profile.")
@@ -106,7 +104,6 @@ class UnifiedOptimizer:
         self.profiles = list(profiles)
         self.shareable = set(shareable_categories or [])
         self.topk = int(max(1, topk_per_category))
-        self.shared_first = bool(shared_first)
 
         # Precompute per-type distributions for ranked-per-type normalization
         self._type_values: Dict[str, List[float]] = {}
@@ -154,9 +151,6 @@ class UnifiedOptimizer:
         else:
             self.logger.info("🔗 Shareable categories: (none)")
         self.logger.info(f"🎛️ Top-K per category: {self.topk}")
-        self.logger.info(f"🔁 Shared-first: {'on' if self.shared_first else 'off'}")
-        self.logger.info("📏 Value normalization: ranked-per-type (0..1)")
-        self.logger.info("🧱 Set thresholds: (static, baked-in)")
 
     # --------------------- normalization & scoring ---------------------
 
@@ -303,7 +297,7 @@ class UnifiedOptimizer:
                     used_ids = state["used_ids"]
 
                     # 1) Shared-first (optional)
-                    if cat.name in self.shareable and self.shared_first:
+                    if cat.name in self.shareable:
                         pool_map = {}
                         for lst in per_prof_lists:
                             for c in lst:

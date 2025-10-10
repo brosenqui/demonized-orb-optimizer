@@ -73,7 +73,7 @@ def cli():
 @click.option(
     "--epsilon",
     type=float,
-    default=0.0,
+    default=0.02,
     show_default=True,
     help="Blend factor for default profile (keep small, e.g., 0.01–0.05).",
 )
@@ -85,14 +85,6 @@ def cli():
     show_default=True,
     help="Optional profiles.json enabling multiple profiles.",
 )
-# Shareable categories can also be specified inside profiles.json; this flag is a quick override
-@click.option(
-    "--share",
-    type=str,
-    default=None,
-    show_default=True,
-    help="Comma-separated shareable categories (overrides profiles.json).",
-)
 # Performance knobs
 @click.option(
     "--topk",
@@ -100,12 +92,6 @@ def cli():
     default=20,
     show_default=True,
     help="Per-profile Top-K combos kept per category (prunes candidate pairs).",
-)
-@click.option(
-    "--shared-first/--no-shared-first",
-    default=True,
-    show_default=True,
-    help="Try identical shared combos first on shareable categories.",
 )
 # Search / refine / verbosity
 @click.option("--beam", type=int, default=200, show_default=True, help="Beam width.")
@@ -132,9 +118,7 @@ def optimize(
     power,
     epsilon,
     profiles,
-    share,
     topk,
-    shared_first,
     beam,
     refine_passes,
     refine_report,
@@ -195,10 +179,7 @@ def optimize(
                 weight=1.0,
             )
         ]
-
-    # Optional override for shareable categories
-    if share:
-        shareable_categories = [s.strip() for s in share.split(",") if s.strip()]
+        shareable_categories = None
 
     # Build unified optimizer
     uopt = UnifiedOptimizer(
@@ -207,8 +188,7 @@ def optimize(
         logger=logger,
         profiles=profile_list,
         shareable_categories=shareable_categories,
-        topk_per_category=topk,
-        shared_first=shared_first,
+        topk_per_category=topk
     )
 
     result = uopt.optimize(beam_width=beam)
