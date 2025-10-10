@@ -6,6 +6,9 @@ import bisect
 from collections import Counter, defaultdict
 from itertools import combinations, product
 from typing import Any, Dict, List, Tuple
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import math
 
 from .models import Orb, Category, ProfileConfig
 from .defaults import DEFAULT_SET_COUNTS
@@ -23,11 +26,75 @@ def _tiers_from_level(level: int) -> int:
 
 def _orb_ids(objs: List[Orb] | Tuple[Orb, ...]) -> set[int]:
     """Python instance ids -> use as unique inventory handles."""
-    return {id(o) for o in objs}
+    return {orb_key(o) for o in objs}
+
+# --- Stable orb key helpers 
+def orb_key(o):
+    return (getattr(o, 'type', None), getattr(o, 'set_name', None), getattr(o, 'value', None), getattr(o, 'level', None))
 
 def _combo_key(combo: tuple[Orb, ...]) -> tuple[int, ...]:
     """Hashable identity for a combo: sorted object ids."""
-    return tuple(sorted(id(o) for o in combo))
+    return tuple(sorted(orb_key(o) for o in combo))
+
+# ---- Top-level batch scoring function for multiprocessing ----
+def score_combo_batch(batch, profile_dict, cat_name, remaining_cats_names, orb_base_scores, orb_level_scores, profiles_dicts, valid_combos_by_cat, orbs_dicts):
+    """Score a batch of combinations for a profile or all profiles if shared.
+    - batch: list of combos (tuple of orbs)
+    - profile_dict: dict or None (for shared)
+    - cat_name: str
+    - remaining_cats_names: list of str
+    - orb_base_scores: dict of orb id to base score
+    - orb_level_scores: dict of orb id to level score
+    - profiles_dicts: list of dicts (for shared)
+    - valid_combos_by_cat: dict of cat_name to list of combos
+    - orbs_dicts: list of dicts (not used, but for future-proofing)
+    """
+    def approx_combo_score(prof, cat_name, combo, remaining_cats_names):
+        orb_q = 0.0
+        for o in combo:
+            base = orb_base_scores[orb_key(o)]
+            level_score = orb_level_scores[orb_key(o)]
+            orb_q += base * prof['orb_type_weights'].get(o.type, 1.0)
+            orb_q += level_score * prof['orb_level_weights'].get(o.type, 0.0)
+        flexibility_score = 0.0
+        if remaining_cats_names:
+            used_orbs = set(orb_key(o) for o in combo)
+            for future_cat_name in remaining_cats_names:
+                valid_future_count = sum(
+                    1 for c in valid_combos_by_cat[future_cat_name]
+                    if not (used_orbs & set(orb_key(o) for o in c))
+                )
+                total_combos = len(valid_combos_by_cat[future_cat_name])
+                if total_combos > 0:
+                    flexibility_score += valid_future_count / total_combos
+            flexibility_score /= len(remaining_cats_names)
+        set_hint = 0.0
+        seen_sets = {o.set_name for o in combo}
+        for s in seen_sets:
+            set_hint += 0.25 * prof['set_priority'].get(s, 0.0)
+        if prof['objective'] == "types-first":
+            score = orb_q + prof['epsilon'] * set_hint
+        else:
+            score = set_hint + prof['epsilon'] * orb_q
+        return score
+
+    scored = []
+    if profile_dict is not None:
+        # Non-shared: score for specific profile
+        for combo in batch:
+            score = approx_combo_score(profile_dict, cat_name, combo, remaining_cats_names)
+            scored.append((score, combo))
+    else:
+        # Shared: weighted average across all profiles
+        for combo in batch:
+            total_score = 0
+            total_weight = 0
+            for prof in profiles_dicts:
+                total_score += prof['weight'] * approx_combo_score(prof, cat_name, combo, remaining_cats_names)
+                total_weight += prof['weight']
+            score = total_score / total_weight if total_weight > 0 else 0
+            scored.append((score, combo))
+    return scored
 
 # --------------------------- Unified Optimizer ---------------------------
 
@@ -77,11 +144,18 @@ class UnifiedOptimizer:
         self.profiles = list(profiles)
         self.shareable = set(shareable_categories or [])
         self.topk = int(max(1, topk_per_category))
+        
+        # Initialize reservations tracking
+        self.reserved_orbs =  self._calculate_reserved_orbs()
+
 
         # Initialize score caches
         self._orb_base_scores = {}
         self._orb_level_scores = {}
         self._type_values = {}
+        
+        # Precompute scores immediately after initialization
+        self._precompute_orb_scores()
 
         # Precompute per-type distributions for ranked-per-type normalization
         buckets: Dict[str, List[float]] = defaultdict(list)
@@ -93,21 +167,6 @@ class UnifiedOptimizer:
         for t, vals in buckets.items():
             vals.sort()
             self._type_values[t] = vals
-
-        # Now precompute orb scores using the type values
-        self._precompute_orb_scores()
-        
-        # Reserve orbs for non-shareable categories
-        self.reserved_orbs = self._calculate_reserved_orbs()
-
-        # Precompute per-type distributions for ranked-per-type normalization
-        self._type_values: Dict[str, List[float]] = {}
-        buckets: Dict[str, List[float]] = defaultdict(list)
-        for o in self.orbs:
-            try:
-                buckets[o.type].append(float(o.value))
-            except Exception:
-                buckets[o.type].append(0.0)
         for t, vals in buckets.items():
             vals.sort()
             self._type_values[t] = vals
@@ -164,9 +223,10 @@ class UnifiedOptimizer:
                 raw = float(orb.value)
             except Exception:
                 raw = 0.0
-            self._orb_base_scores[id(orb)] = self._percentile_within_type(orb.type, raw)
+            key = orb_key(orb)
+            self._orb_base_scores[key] = self._percentile_within_type(orb.type, raw)
             # Cache level scores
-            self._orb_level_scores[id(orb)] = _tiers_from_level(orb.level)
+            self._orb_level_scores[key] = _tiers_from_level(orb.level)
             
         self.logger.info("✓ Finished precomputing scores for %d orbs", len(self.orbs))
 
@@ -204,8 +264,8 @@ class UnifiedOptimizer:
         # Orb score (using cached scores)
         orb_score = 0.0
         for o in chosen:
-            base = self._orb_base_scores[id(o)]
-            level_score = self._orb_level_scores[id(o)]
+            base = self._orb_base_scores[orb_key(o)]
+            level_score = self._orb_level_scores[orb_key(o)]
             orb_score += base * prof.orb_type_weights.get(o.type, 1.0)
             orb_score += level_score * prof.orb_level_weights.get(o.type, 0.0)
 
@@ -246,22 +306,22 @@ class UnifiedOptimizer:
         # Base score from orb quality (using cached scores)
         orb_q = 0.0
         for o in combo:
-            base = self._orb_base_scores[id(o)]
-            level_score = self._orb_level_scores[id(o)]
+            base = self._orb_base_scores[orb_key(o)]
+            level_score = self._orb_level_scores[orb_key(o)]
             orb_q += base * prof.orb_type_weights.get(o.type, 1.0)
             orb_q += level_score * prof.orb_level_weights.get(o.type, 0.0)
             
         # Add flexibility score if we have remaining categories
         flexibility_score = 0.0
         if remaining_cats:
-            used_orbs = set(id(o) for o in combo)
-            available_orbs = set(id(o) for o in self.orbs) - used_orbs
+            used_orbs = set(orb_key(o) for o in combo)
+            available_orbs = set(orb_key(o) for o in self.orbs) - used_orbs
             
             # Check how many valid combinations remain for each category
             for future_cat in remaining_cats:
                 valid_future_count = sum(
                     1 for c in self._valid_combos_by_cat[future_cat.name]
-                    if not (used_orbs & set(id(o) for o in c))
+                    if not (used_orbs & set(orb_key(o) for o in c))
                 )
                 total_combos = len(self._valid_combos_by_cat[future_cat.name])
                 if total_combos > 0:
@@ -327,11 +387,32 @@ class UnifiedOptimizer:
         # Log initial memory usage
         self.logger.debug(f"Initial memory usage: {get_memory_usage_mb():.1f} MB")
 
-        # sort categories by “hardness”: shareable first, then smallest branching
-        cats = sorted(self.categories, key=self._category_sort_key)
-        self.logger.info(
-            f"Category processing order: {', '.join(c.name for c in cats)}"
-        )
+        # Sort categories and gather sort metrics for logging
+        cats = []
+        for cat in self.categories:
+            total_combos = len(self._valid_combos_by_cat[cat.name])
+            slot_demand = cat.slots if cat.name in self.shareable else cat.slots * len(self.profiles)
+            combo_size_score = math.log10(total_combos) if total_combos > 0 else 0
+            cats.append((cat, total_combos, combo_size_score, slot_demand))
+
+        # Sort using the same logic as _category_sort_key
+        cats.sort(key=lambda x: (
+            int(x[2] * 100),  # combo_size_score
+            0 if x[0].name in self.shareable else 1,  # is_non_shareable
+            -x[3]  # -slot_demand
+        ))
+
+        # Log detailed category ordering info
+        self.logger.info("📊 Category processing order (from smallest to largest search space):")
+        for i, (cat, total_combos, score, slots) in enumerate(cats, 1):
+            self.logger.info(
+                f"   {i}. {cat.name:<6} - {total_combos:,} combinations"
+                f" (log10 score: {score:.1f})"
+                f" | {slots} {'shared ' if cat.name in self.shareable else ''}slots"
+            )
+
+        # Extract just the categories for processing
+        cats = [c[0] for c in cats]
 
         for cat_idx, cat in enumerate(cats):
             # Calculate adaptive parameters
@@ -515,104 +596,102 @@ class UnifiedOptimizer:
             remaining_cats = cats[cat_idx + 1:]
             
             # Score and filter combinations considering future impact in parallel
-            import concurrent.futures
-            from concurrent.futures import ThreadPoolExecutor
-            import math
-
-            def score_combo_batch(batch, profile=None):
-                """Score a batch of combinations for a profile or all profiles if shared."""
-                scored = []
-                for combo in batch:
-                    if profile:
-                        # Non-shared: score for specific profile
-                        score = self._approx_combo_score(profile, cat.name, combo, remaining_cats)
-                    else:
-                        # Shared: weighted average across all profiles
-                        total_score = 0
-                        total_weight = 0
-                        for p in self.profiles:
-                            total_score += p.weight * self._approx_combo_score(p, cat.name, combo, remaining_cats)
-                            total_weight += p.weight
-                        score = total_score / total_weight if total_weight > 0 else 0
-                    scored.append((score, combo))
-                return scored
 
             scored_combos = []
             combos = self._valid_combos_by_cat[cat.name]
             total_combos = len(combos)
             batch_size = 1000  # Process combos in batches of 1000
-            num_threads = min(8, math.ceil(total_combos / batch_size))  # Cap at 8 threads
-            
+            num_procs = min(8, math.ceil(total_combos / batch_size))  # Cap at 8 processes
+
             # Split combinations into batches
             batches = [
-                combos[i:i + batch_size] 
+                combos[i:i + batch_size]
                 for i in range(0, len(combos), batch_size)
             ]
-            
-            # For shared categories, score only once using all profiles' weights
+
+            # Prepare picklable data for multiprocessing
+            orb_base_scores = self._orb_base_scores
+            orb_level_scores = self._orb_level_scores
+            valid_combos_by_cat = self._valid_combos_by_cat
+            orbs = self.orbs
+            from dataclasses import asdict
+            profiles_dicts = [asdict(p) for p in self.profiles]
+            orbs_dicts = [asdict(o) for o in self.orbs]
+            remaining_cats_names = [c.name for c in remaining_cats]
+
             if cat.name in self.shareable:
                 self.logger.info(
                     f"⏳ Scoring combinations for shared category {cat.name} "
-                    f"using {num_threads} threads"
+                    f"using {num_procs} processes"
                 )
-                
                 scored = []
-                with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                with ProcessPoolExecutor(max_workers=num_procs) as executor:
                     future_to_batch = {
-                        executor.submit(score_combo_batch, batch): i 
+                        executor.submit(
+                            score_combo_batch,
+                            batch,
+                            None,  # profile_dict=None for shared
+                            cat.name,
+                            remaining_cats_names,
+                            orb_base_scores,
+                            orb_level_scores,
+                            profiles_dicts,
+                            valid_combos_by_cat,
+                            orbs_dicts,
+                        ): i
                         for i, batch in enumerate(batches)
                     }
-                    
                     completed = 0
                     for future in concurrent.futures.as_completed(future_to_batch):
                         batch_idx = future_to_batch[future]
                         batch_results = future.result()
                         scored.extend(batch_results)
-                        
                         completed += len(batches[batch_idx])
                         self.logger.info(
                             f"   • Evaluated {completed}/{total_combos} combinations "
                             f"({completed/total_combos*100:.1f}%)"
                         )
-                
                 scored.sort(key=lambda x: x[0], reverse=True)
                 self.logger.info(f"   ✓ Finished scoring {total_combos} combinations")
-                # For shared categories, use the same scored list for all profiles
                 min_required = max(adaptive_topk, int(len(combos) * 0.1))  # At least 10% of combos
                 top_combos = [c for _, c in scored[:min_required]]
                 scored_combos.extend([top_combos] * len(self.profiles))
             else:
-                # For non-shared categories, score separately for each profile
                 for p_idx, p in enumerate(self.profiles):
                     self.logger.info(
                         f"⏳ Scoring combinations for profile {p.name} "
-                        f"({p_idx + 1}/{len(self.profiles)}) using {num_threads} threads"
+                        f"({p_idx + 1}/{len(self.profiles)}) using {num_procs} processes"
                     )
-                    
                     scored = []
-                    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                    with ProcessPoolExecutor(max_workers=num_procs) as executor:
                         future_to_batch = {
-                            executor.submit(score_combo_batch, batch, p): i 
+                            executor.submit(
+                                score_combo_batch,
+                                batch,
+                                asdict(p),
+                                cat.name,
+                                remaining_cats_names,
+                                orb_base_scores,
+                                orb_level_scores,
+                                profiles_dicts,
+                                valid_combos_by_cat,
+                                orbs_dicts,
+                            ): i
                             for i, batch in enumerate(batches)
                         }
-                        
                         completed = 0
                         for future in concurrent.futures.as_completed(future_to_batch):
                             batch_idx = future_to_batch[future]
                             batch_results = future.result()
                             scored.extend(batch_results)
-                            
                             completed += len(batches[batch_idx])
                             self.logger.info(
                                 f"   • Evaluated {completed}/{total_combos} combinations "
                                 f"({completed/total_combos*100:.1f}%)"
                             )
-                    
                     scored.sort(key=lambda x: x[0], reverse=True)
                     self.logger.info(f"   ✓ Finished scoring {total_combos} combinations")
-                    # Take top K but ensure we have enough variety
-                    min_required = max(adaptive_topk, 
-                                     int(len(combos) * 0.1))  # At least 10% of combos
+                    min_required = max(adaptive_topk, int(len(combos) * 0.1))  # At least 10% of combos
                     scored_combos.append([c for _, c in scored[:min_required]])
             
             self.logger.info(
@@ -887,18 +966,18 @@ class UnifiedOptimizer:
             min_slots_needed = cat.slots  # Non-shareable categories already filtered
             
             for orb_type, sorted_orbs in sorted_by_type.items():
-                available = [o for o in sorted_orbs if id(o) not in orbs_taken[orb_type]]
+                available = [o for o in sorted_orbs if orb_key(o) not in orbs_taken[orb_type]]
                 # For non-shareable categories, we need separate orbs for each profile
                 min_reserve = min(len(available), min_slots_needed * len(self.profiles))
                 reserved_orbs = available[:min_reserve]
                 cat_reserved[orb_type].extend(reserved_orbs)
-                orbs_taken[orb_type].update(id(o) for o in reserved_orbs)
+                orbs_taken[orb_type].update(orb_key(o) for o in reserved_orbs)
             
             reserved[cat.name] = cat_reserved
         
         # Second pass: distribute remaining high-value orbs
         for orb_type, sorted_orbs in sorted_by_type.items():
-            available = [o for o in sorted_orbs if id(o) not in orbs_taken[orb_type]]
+            available = [o for o in sorted_orbs if orb_key(o) not in orbs_taken[orb_type]]
             extra_reserve = int(len(available) * reserve_ratio)
             if extra_reserve > 0:
                 # Distribute extra orbs proportionally to slot count
@@ -909,7 +988,7 @@ class UnifiedOptimizer:
                     if share > 0:
                         cat_orbs = available[:share]
                         reserved[cat_name][orb_type].extend(cat_orbs)
-                        orbs_taken[orb_type].update(id(o) for o in cat_orbs)
+                        orbs_taken[orb_type].update(orb_key(o) for o in cat_orbs)
                         available = available[share:]
     
         return reserved
@@ -944,21 +1023,18 @@ class UnifiedOptimizer:
         """
         is_non_shareable = 0 if cat.name in self.shareable else 1
         
-        # Calculate how constrained this category is based on valid combos
+        # Get number of combinations for this category
         total_combos = len(self._valid_combos_by_cat[cat.name])
-        max_combos = max(len(combos) for combos in self._valid_combos_by_cat.values())
-        combo_constraint_score = 1.0 - (total_combos / max_combos)
         
         # Calculate actual slot demand considering shareability
         slot_demand = cat.slots if cat.name in self.shareable else cat.slots * len(self.profiles)
         
-        # For shareable categories:
-        # - Process less constrained categories first (more likely to find valid combinations)
-        # - Within same constraint level, prefer higher slot demand
-        if cat.name in self.shareable:
-            return (is_non_shareable, int(combo_constraint_score * 1000), -slot_demand)
+        # New sorting strategy:
+        # 1. Sort by combination space size (smaller first)
+        # 2. Break ties with shareability (shareable first)
+        # 3. Break remaining ties with slot demand (higher first)
         
-        # For non-shareable categories:
-        # - Process after shareable
-        # - Process higher slot demands first
-        return (is_non_shareable, -slot_demand, int(combo_constraint_score * 1000))
+        # Scale total_combos to be the primary sort key
+        combo_size_score = math.log10(total_combos) if total_combos > 0 else 0
+                
+        return (int(combo_size_score * 100), is_non_shareable, -slot_demand)
