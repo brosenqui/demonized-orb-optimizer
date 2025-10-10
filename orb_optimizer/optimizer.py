@@ -42,6 +42,7 @@ Constraints
 
 from __future__ import annotations
 
+import bisect
 from collections import Counter, defaultdict
 from itertools import combinations, product
 from typing import Any, Dict, List, Tuple
@@ -97,6 +98,14 @@ class UnifiedOptimizer:
         topk_per_category: int = 12,
     ):
         if not profiles:
+            raise ValueError("At least one profile configuration is required")
+            
+        # Validate shareable categories exist
+        if shareable_categories:
+            cat_names = {c.name for c in categories}
+            invalid = set(shareable_categories) - cat_names
+            if invalid:
+                raise ValueError(f"Unknown shareable categories: {invalid}")
             raise ValueError("UnifiedOptimizer requires at least one profile.")
         self.orbs = orbs
         self.categories = categories
@@ -158,7 +167,7 @@ class UnifiedOptimizer:
         vals = self._type_values.get(t)
         if not vals:
             return 0.0
-        import bisect
+
 
         i = bisect.bisect_left(vals, v)
         j = bisect.bisect_right(vals, v)
@@ -257,8 +266,18 @@ class UnifiedOptimizer:
 
     # --------------------------- optimization ---------------------------
 
-    def optimize(self, beam_width: int = 200) -> Dict[str, Any]:
-        """Run the joint BEAM search (only mode)."""
+    def optimize(self, beam_width: int = 200) -> Dict[str, Dict[str, Any]]:
+        """Run the joint BEAM search optimization.
+        
+        Args:
+            beam_width: Width of the beam search (default: 200)
+            
+        Returns:
+            Dict containing:
+                - combined_score: float, The final combined score across all profiles
+                - profiles: Dict[str, Dict[str, Any]], Per-profile results and scores
+                - assign: Dict[str, Dict[str, List[Orb]]], Final assignments per profile
+        """
         self.logger.info("⚙️ Starting optimization in BEAM mode...")
         return self._beam_search(beam_width)
 
@@ -411,8 +430,19 @@ class UnifiedOptimizer:
     ) -> Dict[str, Dict[str, List[Orb]]]:
         """Joint greedy refine for N profiles: try single-orb swaps profile-by-profile.
 
-        Accept a swap if the combined key improves and all constraints remain satisfied.
-        For N=1, this behaves like a single-profile refine step.
+        Args:
+            assign: Current assignment of orbs to categories per profile
+            max_passes: Maximum number of refinement passes
+            
+        Returns:
+            Refined assignment with potentially improved scores
+            
+        Notes:
+            Accepts a swap if it improves the combined key while maintaining all constraints:
+            - Within profile: no duplicate types in category, no orb reuse across categories
+            - Across profiles: 
+                * Non-shareable categories: no duplicates allowed
+                * Shareable categories: duplicates allowed ONLY within same category
         """
         if max_passes <= 0:
             return assign

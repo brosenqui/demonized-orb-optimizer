@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 import json
-import logging
 import click
 
 from .data_loader import DataLoader
