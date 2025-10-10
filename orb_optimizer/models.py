@@ -3,6 +3,7 @@
 This module defines dataclasses that represent the main entities in the orb optimization system
 """
 
+from typing import Dict
 from dataclasses import dataclass
 
 
@@ -119,3 +120,17 @@ class OrbLevelSpec:
                 elif t.mode == "mul":
                     mul_prod *= t.value
         return base * mul_prod + add_sum
+
+
+@dataclass
+class ProfileConfig:
+    """Configuration for a single profile (e.g., PVP or PVE)."""
+
+    name: str
+    set_priority: Dict[str, float]
+    orb_type_weights: Dict[str, float]
+    orb_level_weights: Dict[str, float]
+    power: float = 2.0
+    epsilon: float = 0.0
+    objective: str = "sets-first"  # "sets-first" | "types-first"
+    weight: float = 1.0  # contribution to combined objective

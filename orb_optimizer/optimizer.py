@@ -1,136 +1,116 @@
-"""Core optimization logic (thresholds-only set scoring) with ranked-per-type normalization
-and an optional local refinement pass.
+"""Unified optimizer for 1..N profiles (ranked-per-type normalization, BEAM-only).
 
-Primary objective (choose with --objective):
-  - sets-first (default):
-      primary   = set_priority_score + ε * orb_quality_score
-      secondary = orb_quality_score
-  - types-first:
-      primary   = orb_quality_score + ε * set_priority_score
-      secondary = set_priority_score
+Key features:
+- Works for one or many profiles (PVP, PVE, etc.) with shared inventory.
+- Static (baked-in) set thresholds; no external sets.json required.
+- Ranked-per-type normalization to prevent cross-type value scale skew.
+- Beam search only (+ optional joint refine pass).
+- Performance optimizations:
+  * Top-K per-category combo pruning (per-profile, configurable).
+  * Shared-first exploration on shareable categories.
+  * Lightweight copying of assignments for inner-loop speed.
 
-Definitions:
-  set_priority_score = Σ_s W_s * (tiers_met(s) ** power)
-    • W_s: set priority weight
-    • tiers_met(s): number of thresholds reached for set s (from sets.json)
+Scoring (per profile p)
+-----------------------
+  set_score_p = Σ_s [ W_s * (tiers_met_p(s) ** power_p) ]
 
-  orb_quality_score  = Σ_orb [
-      rank_within_type(value) * orb_type_weight[type]       # rank ∈ [0,1], best in type ≈ 1
-    + tiers(level) * orb_level_weight[type]                 # tiers at 3/6/9
+  orb_score_p = Σ_orb [
+      rank_within_type(value) * orb_type_weight_p[type] +
+      tiers(level) * orb_level_weight_p[type]
   ]
 
-Constraints:
-  • Unique orb TYPES within each category (no duplicate types in a single category)
-  • Unique orb INSTANCES across all categories (each inventory orb can be used once)
+Objective (per profile p)
+-------------------------
+  if objective_p == "types-first":
+      primary_p   = orb_score_p + ε_p * set_score_p
+      secondary_p = set_score_p
+  else ("sets-first"):
+      primary_p   = set_score_p + ε_p * orb_score_p
+      secondary_p = orb_score_p
 
-Notes:
-  • We ignore raw % magnitude differences across types by using per-type percentile rank.
-  • This ensures “best Steel” can compete fairly with “best Flame”, etc.
+Combined key across profiles
+----------------------------
+  primary   = Σ_p weight_p * primary_p
+  secondary = Σ_p weight_p * secondary_p
+
+Constraints
+-----------
+- Per-category: no duplicate orb TYPES within that category assignment (for each profile).
+- Global: no orb INSTANCE is reused across the entire multi-profile assignment,
+  except in shareable categories *where the instances are exactly the same* (shared).
 """
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
 from itertools import combinations, product
-from typing import Any, TYPE_CHECKING
+from typing import Any, Dict, List, Tuple
 
-from .models import Orb, Category
-
-if TYPE_CHECKING:
-    from logging import Logger
+from .models import Orb, Category, ProfileConfig
+from .defaults import DEFAULT_SET_COUNTS
 
 
-def tiers_from_level(level: int) -> int:
+# ----------------------------- helpers -----------------------------
+
+
+def _tiers_from_level(level: int) -> int:
     """Return how many level tiers are unlocked at 3, 6, 9."""
     return (
         (1 if level >= 3 else 0) + (1 if level >= 6 else 0) + (1 if level >= 9 else 0)
     )
 
 
-def _orb_ids(objs: list[Orb] | tuple[Orb, ...]) -> set[int]:
-    """Return a set of Python object ids for given orbs (to enforce uniqueness across categories)."""
+def _orb_ids(objs: List[Orb] | Tuple[Orb, ...]) -> set[int]:
+    """Python instance ids -> use as unique inventory handles."""
     return {id(o) for o in objs}
 
+def _combo_key(combo: tuple[Orb, ...]) -> tuple[int, ...]:
+    """Hashable identity for a combo: sorted object ids."""
+    return tuple(sorted(id(o) for o in combo))
 
-class LoadoutOptimizer:
-    """Beam/full search optimizer with thresholds-only set scoring and local refine.
+# --------------------------- Unified Optimizer ---------------------------
 
-    Parameters:
-        orbs: All available orbs from orbs.json.
-        categories: Categories with slot counts.
-        logger: Logger instance.
-        set_thresholds: Mapping set -> sorted list of threshold counts.
-        set_priority: Mapping set -> priority weight (bigger = more important).
-        orb_type_weights: Mapping orb type -> multiplier (bias types, e.g., Steel).
-        orb_level_weights: Mapping orb type -> additive per level tier (3/6/9).
-        power: Exponent applied to tiers_met to reward completion/concentration.
-        epsilon: Blend factor for secondary score in the primary term.
-        objective: "sets-first" or "types-first".
+
+class UnifiedOptimizer:
+    """Joint beam optimizer for N profiles (N≥1) with ranked-per-type normalization.
+
+    If given one profile, behaves like a single-profile solver.
+    If given multiple profiles, searches jointly with a shared inventory.
+
+    Args:
+        orbs: inventory of Orb objects.
+        categories: list of Category objects (with .name and .slots).
+        logger: logger for progress/debug.
+        profiles: list of ProfileConfig (length >= 1).
+        shareable_categories: names where identical instance combos may be shared (count once).
+        topk_per_category: keep only top-K combos per profile per category during expansion.
+        shared_first: if True, try identical “shared” combos first on shareable categories.
     """
 
     def __init__(
         self,
         *,
-        orbs: list[Orb],
-        categories: list[Category],
-        logger: Logger,
-        set_thresholds: dict[str, list[int]],
-        set_priority: dict[str, float],
-        orb_type_weights: dict[str, float],
-        orb_level_weights: dict[str, float],
-        power: float = 2.0,
-        epsilon: float = 0.0,
-        objective: str = "sets-first",
+        orbs: List[Orb],
+        categories: List[Category],
+        logger,
+        profiles: List[ProfileConfig],
+        shareable_categories: List[str] | None = None,
+        topk_per_category: int = 12,
+        shared_first: bool = True,
     ):
+        if not profiles:
+            raise ValueError("UnifiedOptimizer requires at least one profile.")
         self.orbs = orbs
         self.categories = categories
         self.logger = logger
+        self.profiles = list(profiles)
+        self.shareable = set(shareable_categories or [])
+        self.topk = int(max(1, topk_per_category))
+        self.shared_first = bool(shared_first)
 
-        self.set_thresholds = set_thresholds
-        self.set_priority = set_priority
-        self.power = float(power)
-
-        self.orb_type_weights = orb_type_weights
-        self.orb_level_weights = orb_level_weights
-
-        self.epsilon = float(epsilon)
-        self.objective = objective
-
-        # Precompute per-type value distributions for percentile ranks
-        self._prepare_value_normalizer()
-
-        # Logging
-        self.logger.info(
-            "🏷️ Set priorities: "
-            + ", ".join(f"{k}={v:g}" for k, v in sorted(self.set_priority.items()))
-        )
-        self.logger.info(f"ᵖ Power (set concentration exponent): {self.power:g}")
-        self.logger.info(
-            "🗂️  Sets with thresholds: " + ", ".join(sorted(self.set_thresholds.keys()))
-        )
-        if self.orb_type_weights:
-            self.logger.info(
-                "🎚️ Orb-type weights: "
-                + ", ".join(
-                    f"{k}={v:g}" for k, v in sorted(self.orb_type_weights.items())
-                )
-            )
-        if self.orb_level_weights:
-            self.logger.info(
-                "📈 Orb-level weights: "
-                + ", ".join(
-                    f"{k}={v:g}" for k, v in sorted(self.orb_level_weights.items())
-                )
-            )
-        self.logger.info(f"ε Epsilon blend: {self.epsilon:g}")
-        self.logger.info(f"🎯 Objective: {self.objective}")
-        self.logger.info("📏 Value normalization: ranked-per-type (0..1)")
-
-    # ---- Value normalization (ranked per type) ----
-    def _prepare_value_normalizer(self) -> None:
-        """Build per-type sorted value lists for percentile ranking."""
-        self._type_values: dict[str, list[float]] = {}
-        buckets: dict[str, list[float]] = defaultdict(list)
+        # Precompute per-type distributions for ranked-per-type normalization
+        self._type_values: Dict[str, List[float]] = {}
+        buckets: Dict[str, List[float]] = defaultdict(list)
         for o in self.orbs:
             try:
                 buckets[o.type].append(float(o.value))
@@ -140,12 +120,50 @@ class LoadoutOptimizer:
             vals.sort()
             self._type_values[t] = vals
 
+        # Precompute valid combos per category (no duplicate types)
+        self._valid_combos_by_cat: Dict[str, List[Tuple[Orb, ...]]] = {}
+        for cat in self.categories:
+            combos = [
+                c
+                for c in combinations(self.orbs, cat.slots)
+                if len({o.type for o in c}) == len(c)
+            ]
+            self._valid_combos_by_cat[cat.name] = combos
+
+        # Build per-profile Top-K combos per category (performance pruning)
+        self._topk_by_profile_cat: dict[str, dict[str, list[tuple[Orb, ...]]]] = {}
+        for p in self.profiles:
+            per_cat: dict[str, list[tuple[Orb, ...]]] = {}
+            for cat in self.categories:
+                combos = self._valid_combos_by_cat[cat.name]
+                scored = [(self._approx_combo_score(p, cat.name, c), c) for c in combos]
+                scored.sort(key=lambda x: x[0], reverse=True)
+                per_cat[cat.name] = [c for _, c in scored[: self.topk]]
+            self._topk_by_profile_cat[p.name] = per_cat
+
+        # Log basics
+        names = ", ".join(
+            f"{p.name}(w={p.weight:g}, obj={p.objective}, ε={p.epsilon:g}, ᵖ={p.power:g})"
+            for p in self.profiles
+        )
+        self.logger.info(f"👥 Profiles: {names}")
+        if self.shareable:
+            self.logger.info(
+                "🔗 Shareable categories: " + ", ".join(sorted(self.shareable))
+            )
+        else:
+            self.logger.info("🔗 Shareable categories: (none)")
+        self.logger.info(f"🎛️ Top-K per category: {self.topk}")
+        self.logger.info(f"🔁 Shared-first: {'on' if self.shared_first else 'off'}")
+        self.logger.info("📏 Value normalization: ranked-per-type (0..1)")
+        self.logger.info("🧱 Set thresholds: (static, baked-in)")
+
+    # --------------------- normalization & scoring ---------------------
+
     def _percentile_within_type(self, t: str, v: float) -> float:
-        """Return percentile rank of value v within its type t in [0, 1]."""
         vals = self._type_values.get(t)
         if not vals:
             return 0.0
-        # binary search rank
         import bisect
 
         i = bisect.bisect_left(vals, v)
@@ -155,238 +173,355 @@ class LoadoutOptimizer:
             return 1.0
         return rank / (len(vals) - 1)
 
-    # ---- Scoring ----
-    def _score_breakdown(
-        self, loadout: dict[str, list[Orb]]
-    ) -> tuple[float, float, dict[str, Any]]:
-        chosen = [orb for group in loadout.values() for orb in group]
+    def _score_one(
+        self, prof: ProfileConfig, loadout: Dict[str, List[Orb]]
+    ) -> Tuple[float, float]:
+        """Compute (set_score, orb_score) for a single profile."""
+        chosen = [o for group in loadout.values() for o in group]
 
-        # Set priority score (thresholds-only)
+        # Set score (uses static DEFAULT_SET_THRESHOLDS)
         counts = Counter(o.set_name for o in chosen)
         set_score = 0.0
-        active_sets: dict[str, Any] = {}
         for s, c in counts.items():
-            thresholds = self.set_thresholds.get(s)
-            if not thresholds:
-                continue  # strict thresholds-only: sets without thresholds = no contribution
-            tiers_met = sum(1 for t in thresholds if c >= t)
+            th = DEFAULT_SET_COUNTS.get(s)
+            if not th:
+                continue
+            tiers_met = sum(1 for t in th if c >= t)
             if tiers_met <= 0:
                 continue
-            w = self.set_priority.get(s, 0.0)
-            contribution = w * (tiers_met**self.power)
-            set_score += contribution
-            active_sets[s] = {
-                "count": c,
-                "priority": w,
-                "tiers_met": tiers_met,
-                "contribution": contribution,
-            }
+            w = prof.set_priority.get(s, 0.0)
+            set_score += w * (tiers_met**prof.power)
 
-        # Orb quality score (ranked-per-type normalization)
+        # Orb score (ranked-per-type + level tiers)
         orb_score = 0.0
         for o in chosen:
             try:
                 raw = float(o.value)
             except Exception:
                 raw = 0.0
-            base = self._percentile_within_type(o.type, raw)  # 0..1 within that type
-            orb_score += base * self.orb_type_weights.get(o.type, 1.0)
-            orb_score += tiers_from_level(o.level) * self.orb_level_weights.get(
+            base = self._percentile_within_type(o.type, raw)
+            orb_score += base * prof.orb_type_weights.get(o.type, 1.0)
+            orb_score += _tiers_from_level(o.level) * prof.orb_level_weights.get(
                 o.type, 0.0
             )
 
-        return set_score, orb_score, {"sets": active_sets}
+        return set_score, orb_score
 
-    def _score_key(self, loadout: dict[str, list[Orb]]) -> tuple[float, float]:
-        set_score, orb_score, _ = self._score_breakdown(loadout)
+    def _primary_secondary(
+        self, prof: ProfileConfig, set_s: float, orb_s: float
+    ) -> Tuple[float, float]:
+        if prof.objective == "types-first":
+            return (orb_s + (prof.epsilon * set_s if prof.epsilon else 0.0), set_s)
+        return (set_s + (prof.epsilon * orb_s if prof.epsilon else 0.0), orb_s)
 
-        if self.objective == "types-first":
-            primary = orb_score + (self.epsilon * set_score if self.epsilon else 0.0)
-            secondary = set_score
-        else:
-            primary = set_score + (self.epsilon * orb_score if self.epsilon else 0.0)
-            secondary = orb_score
-
+    def _key(self, assignments: Dict[str, Dict[str, List[Orb]]]) -> Tuple[float, float]:
+        """Combined key across all profiles: (primary, secondary)."""
+        primary = 0.0
+        secondary = 0.0
+        for p in self.profiles:
+            set_s, orb_s = self._score_one(p, assignments[p.name])
+            p1, p2 = self._primary_secondary(p, set_s, orb_s)
+            primary += p.weight * p1
+            secondary += p.weight * p2
         return (primary, secondary)
 
-    # ---- Search ----
-    def optimize(self, mode: str = "beam", beam_width: int = 400) -> dict[str, Any]:
-        self.logger.info(f"⚙️ Starting optimization in {mode.upper()} mode...")
-        if mode == "full":
-            return self._full_search()
+    # --------------------- heuristics for Top-K pruning ---------------------
+
+    def _approx_combo_score(
+        self, prof: ProfileConfig, cat_name: str, combo: tuple[Orb, ...]
+    ) -> float:
+        """Fast local heuristic to rank combos for pruning.
+
+        Combines a quick orb-quality estimate (ranked value + level tiers) with a
+        small optimistic set hint based on the sets present in this combo.
+        """
+        # orb quality part
+        orb_q = 0.0
+        for o in combo:
+            try:
+                raw = float(o.value)
+            except Exception:
+                raw = 0.0
+            base = self._percentile_within_type(o.type, raw)
+            orb_q += base * prof.orb_type_weights.get(o.type, 1.0)
+            orb_q += _tiers_from_level(o.level) * prof.orb_level_weights.get(
+                o.type, 0.0
+            )
+
+        # optimistic set hint: light nudge toward high-priority sets
+        set_hint = 0.0
+        seen_sets = {o.set_name for o in combo}
+        for s in seen_sets:
+            set_hint += 0.25 * prof.set_priority.get(s, 0.0)  # 25% of set weight
+
+        # combine per objective (just for ordering)
+        if prof.objective == "types-first":
+            score = orb_q + prof.epsilon * set_hint
+        else:
+            score = set_hint + prof.epsilon * orb_q
+        return score
+
+    # --------------------------- optimization ---------------------------
+
+    def optimize(self, beam_width: int = 200) -> Dict[str, Any]:
+        """Run the joint BEAM search (only mode)."""
+        self.logger.info("⚙️ Starting optimization in BEAM mode...")
         return self._beam_search(beam_width)
 
-    def _beam_search(self, beam_width: int) -> dict[str, Any]:
-        """Beam search with:
-        - unique orb TYPES within each category
-        - unique orb INSTANCES across all categories
-        """
-        partials = [
-            {
-                "assign": {c.name: [] for c in self.categories},
-                "used_ids": set(),
-                "key": (0.0, 0.0),
-            }
-        ]
+    def _copy_assign_with(
+        self,
+        assign: Dict[str, Dict[str, List[Orb]]],
+        cat_name: str,
+        choices_per_profile: List[tuple[Orb, ...]],
+    ) -> Dict[str, Dict[str, List[Orb]]]:
+        """Shallow copy `assign`, replacing only `cat_name` per profile with the given combos."""
+        new_assign: Dict[str, Dict[str, List[Orb]]] = {}
+        for p, cmb in zip(self.profiles, choices_per_profile):
+            pmap = assign[p.name]
+            new_pmap = dict(pmap)
+            new_pmap[cat_name] = list(cmb)
+            new_assign[p.name] = new_pmap
+        return new_assign
 
-        for cat in self.categories:
-            next_states = []
+    def _beam_search(self, beam_width: int) -> Dict[str, Any]:
+        # Start state
+        start_assign = {p.name: {c.name: [] for c in self.categories} for p in self.profiles}
+        partials = [{"assign": start_assign, "used_ids": set(), "key": (0.0, 0.0)}]
+
+        # Order categories by “hardness”: smallest branching first; non-shareable before shareable.
+        cats = sorted(
+            self.categories,
+            key=lambda c: (self._branching_size(c), 1 if c.name in self.shareable else 0)
+        )
+
+        for cat in cats:
             self.logger.debug(f"Evaluating category: {cat.name}")
 
-            for state in partials:
-                assign = state["assign"]
-                used_ids = state["used_ids"]
+            def expand_with_lists(partials_in, per_prof_lists):
+                out = []
+                for state in partials_in:
+                    used_ids = state["used_ids"]
 
-                for combo in combinations(self.orbs, cat.slots):
-                    # Unique orb TYPES within this category
-                    if len({o.type for o in combo}) < len(combo):
-                        continue
+                    # 1) Shared-first (optional)
+                    if cat.name in self.shareable and self.shared_first:
+                        pool_map = {}
+                        for lst in per_prof_lists:
+                            for c in lst:
+                                pool_map[_combo_key(c)] = c
+                        shared_pool = list(pool_map.values())
 
-                    # Unique orb INSTANCES across all categories
-                    combo_ids = _orb_ids(combo)
-                    if used_ids & combo_ids:
-                        continue
+                        for c in shared_pool:
+                            ids = _orb_ids(c)
+                            if used_ids & ids:
+                                continue
+                            new_assign = self._copy_assign_with(state["assign"], cat.name, [c] * len(self.profiles))
+                            new_used = used_ids | ids
+                            key = self._key(new_assign)
+                            out.append({"assign": new_assign, "used_ids": new_used, "key": key})
 
-                    new_assign = {k: list(v) for k, v in assign.items()}
-                    new_assign[cat.name] = list(combo)
-                    new_used = used_ids | combo_ids
-                    key = self._score_key(new_assign)
+                    # 2) Divergent pairs (Cartesian over lists)
+                    for per_profile_choices in product(*per_prof_lists):
+                        id_sets = [_orb_ids(cmb) for cmb in per_profile_choices]
 
-                    next_states.append(
-                        {"assign": new_assign, "used_ids": new_used, "key": key}
+                        if cat.name in self.shareable:
+                            # equal-or-disjoint + no overlap with used_ids
+                            valid = True
+                            for s in id_sets:
+                                if used_ids & s:
+                                    valid = False
+                                    break
+                            if not valid:
+                                continue
+                            for i in range(len(id_sets)):
+                                for j in range(i + 1, len(id_sets)):
+                                    if id_sets[i] != id_sets[j] and (id_sets[i] & id_sets[j]):
+                                        valid = False
+                                        break
+                                if not valid:
+                                    break
+                            if not valid:
+                                continue
+                            new_used = set(used_ids)
+                            for s in id_sets:
+                                new_used |= s
+                        else:
+                            # Non-shareable: pairwise disjoint and disjoint from used_ids
+                            new_used = set(used_ids)
+                            valid = True
+                            for s in id_sets:
+                                if new_used & s:
+                                    valid = False
+                                    break
+                                new_used |= s
+                            if not valid:
+                                continue
+                            for i in range(len(id_sets)):
+                                for j in range(i + 1, len(id_sets)):
+                                    if id_sets[i] & id_sets[j]:
+                                        valid = False
+                                        break
+                                if not valid:
+                                    break
+                            if not valid:
+                                continue
+
+                        new_assign = self._copy_assign_with(state["assign"], cat.name, list(per_profile_choices))
+                        key = self._key(new_assign)
+                        out.append({"assign": new_assign, "used_ids": new_used, "key": key})
+                return out
+
+            # Try Top-K
+            per_prof_lists_topk = [self._topk_by_profile_cat[p.name][cat.name] for p in self.profiles]
+            next_states = expand_with_lists(partials, per_prof_lists_topk)
+
+            # Fallback to FULL lists if Top-K produced nothing
+            if not next_states:
+                full_lists = [self._valid_combos_by_cat[cat.name] for _ in self.profiles]
+                self.logger.warning(
+                    f"⚠️ No candidates after Top-K for {cat.name}; retrying with full combo lists "
+                    f"(Top-K={self.topk}, beam={beam_width})."
+                )
+                next_states = expand_with_lists(partials, full_lists)
+
+                if not next_states:
+                    total_full = len(self._valid_combos_by_cat[cat.name])
+                    self.logger.error(
+                        "❌ Still no feasible states after full retry. "
+                        f"Category={cat.name}, combos={total_full}, shareable={cat.name in self.shareable}. "
+                        "Likely every candidate collides with already-used orbs from previous categories."
+                    )
+                    # EARLY EXIT (prevents max([]) later)
+                    raise RuntimeError(
+                        f"No feasible assignments for category '{cat.name}' with current beam/inventory constraints. "
+                        "Try increasing --beam or --topk, or removing this category from shareable_categories."
                     )
 
             next_states.sort(key=lambda s: s["key"], reverse=True)
             partials = next_states[:beam_width]
             self.logger.debug(f"Beam narrowed to {len(partials)} states for {cat.name}")
 
+        # Finish
         best_state = max(partials, key=lambda s: s["key"])
-        set_score, orb_score, details = self._score_breakdown(best_state["assign"])
-        total = set_score + orb_score
-        details["set_priority_score"] = set_score
-        details["orb_quality_score"] = orb_score
-        return {"score": total, "loadout": best_state["assign"], "details": details}
+        profiles_out: Dict[str, Any] = {}
+        for p in self.profiles:
+            set_s, orb_s = self._score_one(p, best_state["assign"][p.name])
+            profiles_out[p.name] = {"set_score": set_s, "orb_score": orb_s, "loadout": best_state["assign"][p.name]}
 
-    def _full_search(self) -> dict[str, Any]:
-        """Full search with instance/type uniqueness constraints."""
-        self.logger.info("🧮 Performing full search — this may take a while...")
-        best_key = (float("-inf"), float("-inf"))
-        best_loadout: dict[str, list[Orb]] = {}
+        primary, _ = self._key(best_state["assign"])
+        return {"combined_score": primary, "profiles": profiles_out, "assign": best_state["assign"]}
 
-        # Precompute valid combos per category (respecting type-uniqueness per category)
-        all_combos: list[list[tuple[Orb, ...]]] = []
-        for cat in self.categories:
-            valid = [
-                c
-                for c in combinations(self.orbs, cat.slots)
-                if len({o.type for o in c}) == len(c)
-            ]
-            all_combos.append(valid)
+    # --------------------------- refinement ---------------------------
 
-        for combo_set in product(*all_combos):
-            # Enforce global instance uniqueness across categories
-            used_ids: set[int] = set()
-            ok = True
-            for combo in combo_set:
-                ids = _orb_ids(combo)
-                if used_ids & ids:
-                    ok = False
-                    break
-                used_ids |= ids
-            if not ok:
-                continue
+    def refine(
+        self, assign: Dict[str, Dict[str, List[Orb]]], max_passes: int = 1
+    ) -> Dict[str, Dict[str, List[Orb]]]:
+        """Joint greedy refine for N profiles: try single-orb swaps profile-by-profile.
 
-            loadout = {
-                cat.name: list(combo_set[i]) for i, cat in enumerate(self.categories)
-            }
-            key = self._score_key(loadout)
-            if key > best_key:
-                best_key = key
-                best_loadout = loadout
-
-        set_score, orb_score, details = self._score_breakdown(best_loadout)
-        total = set_score + orb_score
-        details["set_priority_score"] = set_score
-        details["orb_quality_score"] = orb_score
-        return {"score": total, "loadout": best_loadout, "details": details}
-
-    # ---- Refinement (local greedy improve) ----
-    def refine_loadout(
-        self, loadout: dict[str, list[Orb]], max_passes: int = 1
-    ) -> dict[str, list[Orb]]:
-        """Greedy local improvement around a finished loadout.
-
-        Tries single-orb swaps using any currently unused orb (respecting constraints).
-        Accepts a swap if the score key improves (primary term, then secondary).
-        Runs up to `max_passes` passes, or stops early if no improvement.
-
-        Args:
-            loadout: Completed loadout mapping category -> list[Orb].
-            max_passes: Number of improvement passes (1-2 is usually plenty).
-
-        Returns:
-            The improved loadout (or the original if no improvements were found).
+        Accept a swap if the combined key improves and all constraints remain satisfied.
+        For N=1, this behaves like a single-profile refine step.
         """
         if max_passes <= 0:
-            return loadout
+            return assign
 
-        best_ld = {k: list(v) for k, v in loadout.items()}
-        best_key = self._score_key(best_ld)
-
-        def current_unused() -> list[Orb]:
-            used = {id(o) for g in best_ld.values() for o in g}
-            return [o for o in self.orbs if id(o) not in used]
+        best = {p: {k: list(v) for k, v in assign[p].items()} for p in assign}
+        best_key = self._key(best)
 
         passes = 0
-        improved_any = True
-
-        while improved_any and passes < max_passes:
-            improved_any = False
+        improved = True
+        while improved and passes < max_passes:
+            improved = False
             passes += 1
-            unused = current_unused()
 
-            for cat_name, group in list(best_ld.items()):
-                types_in_cat = {o.type for o in group}
+            # Iterate profiles/categories/slots
+            for pname, p_assign in list(best.items()):
+                for cat in self.categories:
+                    group = list(p_assign[cat.name])
+                    types_in_cat = {o.type for o in group}
+                    current_ids_group = _orb_ids(tuple(group))
 
-                for i, old in enumerate(list(group)):
-                    for new in list(unused):
-                        if new.type != old.type and new.type in types_in_cat:
-                            continue
+                    for i, old in enumerate(group):
+                        for new in self.orbs:
+                            if id(new) in current_ids_group:
+                                continue  # already in this category
+                            if new.type != old.type and new.type in types_in_cat:
+                                continue  # duplicate type in category
 
-                        # Trial swap
-                        trial = {k: list(v) for k, v in best_ld.items()}
-                        tgroup = list(trial[cat_name])
-                        tgroup[i] = new
-                        trial[cat_name] = tgroup
+                            # Trial assignment (shallow replacement)
+                            trial = {
+                                pp: {k: list(v) for k, v in best[pp].items()}
+                                for pp in best
+                            }
+                            tgroup = list(trial[pname][cat.name])
+                            tgroup[i] = new
+                            trial[pname][cat.name] = tgroup
 
-                        # Enforce unique instances globally
-                        seen: set[int] = set()
-                        ok = True
-                        for g in trial.values():
-                            for o in g:
-                                oid = id(o)
-                                if oid in seen:
-                                    ok = False
+                            # Check share/disjoint for this category across profiles
+                            ids_per_profile = {
+                                pp: _orb_ids(tuple(trial[pp][cat.name])) for pp in trial
+                            }
+                            if cat.name in self.shareable:
+                                ok = True
+                                names = list(trial.keys())
+                                for a in range(len(names)):
+                                    for b in range(a + 1, len(names)):
+                                        A = ids_per_profile[names[a]]
+                                        B = ids_per_profile[names[b]]
+                                        if A != B and (A & B):
+                                            ok = False
+                                            break
+                                    if not ok:
+                                        break
+                                if not ok:
+                                    continue
+                            else:
+                                ok = True
+                                names = list(trial.keys())
+                                for a in range(len(names)):
+                                    for b in range(a + 1, len(names)):
+                                        if (
+                                            ids_per_profile[names[a]]
+                                            & ids_per_profile[names[b]]
+                                        ):
+                                            ok = False
+                                            break
+                                    if not ok:
+                                        break
+                                if not ok:
+                                    continue
+
+                            # Global inventory uniqueness across categories
+                            seen: set[int] = set()
+                            ok = True
+                            for pp, cats in trial.items():
+                                for c2 in self.categories:
+                                    ids = _orb_ids(tuple(cats[c2.name]))
+                                    if seen & ids:
+                                        ok = False
+                                        break
+                                    seen |= ids
+                                if not ok:
                                     break
-                                seen.add(oid)
                             if not ok:
-                                break
-                        if not ok:
-                            continue
+                                continue
 
-                        k = self._score_key(trial)
-                        if k > best_key:
-                            best_ld = trial
-                            best_key = k
-                            improved_any = True
-                            # maintain unused pool
-                            unused.remove(new)
-                            unused.append(old)
-                            types_in_cat = {o.type for o in best_ld[cat_name]}
+                            k = self._key(trial)
+                            if k > best_key:
+                                best = trial
+                                best_key = k
+                                improved = True
+                                break
+                        if improved:
                             break
-                    if improved_any:
+                    if improved:
                         break
-                if improved_any:
+                if improved:
                     break
 
-        return best_ld
+        return best
+    
+    def _branching_size(self, cat) -> int:
+        """Approximate branching: product of Top-K per profile for this category."""
+        size = 1
+        for p in self.profiles:
+            size *= max(1, len(self._topk_by_profile_cat[p.name][cat.name]))
+        return size

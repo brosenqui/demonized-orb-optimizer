@@ -22,66 +22,16 @@ from typing import Any, TYPE_CHECKING
 
 from .models import Orb, Category
 from .utils import parse_value
+from .defaults import (
+    DEFAULT_LEVEL_CAPS,
+    DEFAULT_ORB_LEVEL_WEIGHTS,
+    DEFAULT_ORB_TYPE_WEIGHTS,
+    DEFAULT_SET_COUNTS,
+    DEFAULT_SET_PRIORITY_WEIGHTS,
+)
 
 if TYPE_CHECKING:
     from logging import Logger
-
-# ===== Built-in defaults (for optional knobs) =====
-
-# Priority weights per set (bigger = more important)
-DEFAULT_SET_PRIORITY_WEIGHTS: dict[str, float] = {
-    "Leviathan": 8.0,
-    "Beezlebub": 6.0,
-    "Belphegor": 5.0,
-    "Asmodeus": 3.0,
-    "Mammon": 2.0,
-    "Satan": 1.5,
-    "Lucifer": 1.0,
-}
-
-# Orb-type multipliers, no bias
-DEFAULT_ORB_TYPE_WEIGHTS: dict[str, float] = {
-    "Flame": 1.0,
-    "Water": 1.0,
-    "Wind": 1.0,
-    "Earth": 1.0,
-    "Sun": 1.0,
-    "Grass": 1.0,
-    "Lightning": 1.0,
-    "Steel": 1.0,
-}
-
-# Level caps by rarity
-DEFAULT_LEVEL_CAPS: dict[str, int] = {
-    "Common": 3,
-    "Magic": 3,
-    "Rare": 6,
-    "Heroic": 6,
-    "Legendary": 9,
-    "Mythic": 9,
-}
-
-DEFAULT_SET_COUNTS: dict[str, list[int]] = {
-    "Lucifer": [4, 5],
-    "Mammon": [2, 4, 6],
-    "Leviathan": [3, 5, 6],
-    "Satan": [4, 5, 6],
-    "Asmodeus": [2, 4],
-    "Beezlebub": [1, 3, 5],
-    "Belphegor": [2, 4, 6],
-}
-
-# Additive points per unlocked tier (3/6/9) by orb type
-DEFAULT_ORB_LEVEL_WEIGHTS: dict[str, float] = {
-    "Flame": 1.0,
-    "Water": 1.0,
-    "Wind": 1.0,
-    "Earth": 1.0,
-    "Sun": 1.0,
-    "Grass": 1.0,
-    "Lightning": 1.0,
-    "Steel": 5.0,
-}
 
 
 class DataLoader:
