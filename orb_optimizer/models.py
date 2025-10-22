@@ -3,7 +3,7 @@
 This module defines dataclasses that represent the main entities in the orb optimization system
 """
 
-from typing import Dict
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 
@@ -134,3 +134,10 @@ class ProfileConfig:
     epsilon: float = 0.0
     objective: str = "sets-first"  # "sets-first" | "types-first"
     weight: float = 1.0  # contribution to combined objective
+
+@dataclass(frozen=True)
+class Inputs:
+    orbs: Any                            # List[Orb]
+    categories: Any                      # List[Category]
+    profiles: List[ProfileConfig]        # normalized, ready to use
+    shareable_categories: Optional[List[str]]

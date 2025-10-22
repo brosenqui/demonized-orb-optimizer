@@ -2,7 +2,7 @@
 
 Required inputs:
   - orbs.json     : list of orb records
-  - slots.json    : category -> rarity (slots inferred from rarity)
+  - slots.json    : category -> slots (int)
 
 Optional (with built-in defaults):
   - set_priority.json      : set -> priority weight (bigger = more important)
@@ -53,52 +53,52 @@ class DataLoader:
 
     # -------- Core required data --------
     def load_orbs(self, file_path: str | Path) -> list[Orb]:
-        """Load orbs and clip their levels per rarity caps.
+        """Load orbs and clip their levels per rarity caps."""
+        raw = self.load_json(file_path)
+        out: list[Orb] = []
+        for item in raw:
+            raw_level = item.get("level", 0)
+            try:
+                lvl = int(raw_level) if raw_level is not None else 0
+            except Exception:
+                lvl = 0
 
-        Returns a list for compatibility, but processes items one at a time
-        to reduce memory usage.
-        """
+            rarity = item["rarity"]
+            max_lvl = DEFAULT_LEVEL_CAPS.get(rarity, 0)
+            if lvl > max_lvl:
+                self.logger.warning(
+                    f"⚠️ Orb level {lvl} exceeds cap {max_lvl} for rarity {rarity}; clipping."
+                )
+                lvl = max_lvl
 
-        def orb_generator():
-            raw = self.load_json(file_path)
-            count = 0
-            for item in raw:
-                raw_level = item.get("level", 0)
-                try:
-                    lvl = int(raw_level) if raw_level is not None else 0
-                except Exception:
-                    lvl = 0
-
-                rarity = item["rarity"]
-                max_lvl = DEFAULT_LEVEL_CAPS.get(rarity, 0)
-                if lvl > max_lvl:
-                    self.logger.warning(
-                        f"⚠️ Orb level {lvl} exceeds cap {max_lvl} for rarity {rarity}; clipping."
-                    )
-                    lvl = max_lvl
-
-                try:
-                    yield Orb(
+            try:
+                out.append(
+                    Orb(
                         type=item["type"],
                         set_name=item["set"],
                         rarity=rarity,
                         value=parse_value(item["value"]),
                         level=lvl,
                     )
-                    count += 1
-                except KeyError as e:
-                    self.logger.warning(f"⚠️ Missing key {e} in orb entry: {item}")
-            self.logger.info(f"✅ Loaded {count} orbs.")
-
-        # Convert to list at the end for compatibility
-        return list(orb_generator())
+                )
+            except KeyError as e:
+                self.logger.warning(f"⚠️ Missing key {e} in orb entry: {item}")
+        self.logger.info(f"✅ Loaded {len(out)} orbs.")
+        return out
 
     def load_categories(self, file_path: str | Path) -> list[Category]:
-        """Load category rarities and determine slot counts."""
+        """Load categories (name -> slots) and return Category objects."""
         raw = self.load_json(file_path)
+        if not isinstance(raw, dict):
+            raise ValueError("slots.json must be an object mapping category -> slots (int).")
         cats: list[Category] = []
         for name, slots in raw.items():
-            cats.append(Category(name=name, slots=slots))
+            try:
+                cats.append(Category(name=str(name), slots=int(slots)))
+            except (TypeError, ValueError):
+                self.logger.warning(
+                    f"⚠️ Invalid slots value for {name!r}: {slots!r} (skipped)"
+                )
         self.logger.info(f"✅ Loaded {len(cats)} categories.")
         return cats
 
@@ -116,18 +116,9 @@ class DataLoader:
         default_weights: dict[str, float],
         name: str,
     ) -> dict[str, float]:
-        """Generic loader for weight dictionaries with default fallback.
-
-        Args:
-            file_path: Path to the weights file, or None to use defaults
-            default_weights: Default weights to use if file is missing/invalid
-            name: Name of the weight type for logging messages
-
-        Returns:
-            Dictionary mapping keys to float weights
-        """
+        """Generic loader for weight dictionaries with default fallback."""
         if not file_path:
-            self.logger.warning(f"ℹ️ No {name} file — using built-in defaults.")
+            self.logger.info(f"ℹ️ No {name} file — using built-in defaults.")
             return default_weights.copy()
 
         p = Path(file_path)
@@ -155,7 +146,6 @@ class DataLoader:
     def load_set_priority_or_default(
         self, file_path: str | Path | None
     ) -> dict[str, float]:
-        """Load set priority weights or use defaults."""
         return self._load_weights_or_default(
             file_path, DEFAULT_SET_PRIORITY_WEIGHTS, "set priorities"
         )
@@ -163,7 +153,6 @@ class DataLoader:
     def load_orb_type_weights_or_default(
         self, file_path: str | Path | None
     ) -> dict[str, float]:
-        """Load orb type weights or use defaults."""
         return self._load_weights_or_default(
             file_path, DEFAULT_ORB_TYPE_WEIGHTS, "orb-types"
         )
@@ -171,7 +160,6 @@ class DataLoader:
     def load_orb_level_weights_or_default(
         self, file_path: str | Path | None
     ) -> dict[str, float]:
-        """Load orb level weights or use defaults."""
         return self._load_weights_or_default(
             file_path, DEFAULT_ORB_LEVEL_WEIGHTS, "orb-levels"
         )
