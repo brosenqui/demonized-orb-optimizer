@@ -42,7 +42,7 @@ run:
 # === Lint, Type Check, Format, Test ===
 lint:
 	@echo "$(YELLOW)🔍 Running Ruff...$(RESET)"
-	@$(UV_ENV) $(UV) run ruff check .
+	@$(UV_ENV) $(UV) run ruff check orb_optimizer
 
 typecheck:
 	@echo "$(YELLOW)🧠 Running MyPy...$(RESET)"

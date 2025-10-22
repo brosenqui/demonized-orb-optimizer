@@ -1,81 +1,140 @@
 """Command-line interface for orb optimizer"""
 
 from __future__ import annotations
-from collections import Counter
+
+from typing import Any, Dict
 
 import click
 
 from .data_loader import DataLoader
-from .optimizer import LoadoutOptimizer
-from .utils import setup_logger
+from .solvers.beam import UnifiedOptimizer
+from .solvers.greedy import GreedyOptimizer
+from .models import Inputs
+from .reporter import OptimizationReporter
+from .utils import setup_logger, build_default_profile, build_profiles_from_json
 
-
+# ---------- Root group: loads everything once ----------
 @click.group()
-def cli():
-    """🧮 The Demonized Orb Optimizer"""
-
-
-@cli.command()
 @click.option(
     "--orbs",
-    type=click.Path(exists=True),
-    default="data/orbs.json",
-    show_default=True,
-    help="Path to orbs.json (required).",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
+    required=True,
+    help="Path to orbs.json (REQUIRED).",
 )
 @click.option(
     "--slots",
-    type=click.Path(exists=True),
-    default="data/slots.json",
-    show_default=True,
-    help="Path to slots.json (required).",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
+    required=True,
+    help="Path to slots.json (REQUIRED).",
 )
-# Set priorities (ranking)
+# Optional weights (used when profiles.json is NOT provided)
 @click.option(
     "--set-priority",
-    type=click.Path(),
-    default="data/set_priority.json",
+    type=click.Path(dir_okay=False, readable=True, path_type=str),
+    default=None,
     show_default=True,
-    help="Optional JSON mapping set -> priority weight (bigger = more important).",
+    help="Optional JSON mapping set -> priority weight (default profile only).",
 )
-# Orb weighting & levels
 @click.option(
     "--orb-weights",
-    type=click.Path(),
-    default="data/orb_weights.json",
+    type=click.Path(dir_okay=False, readable=True, path_type=str),
+    default=None,
     show_default=True,
-    help="Optional orb-type weights JSON.",
+    help="Optional orb-type weights JSON (default profile only).",
 )
 @click.option(
     "--orb-level-weights",
-    type=click.Path(),
-    default="data/orb_level_weights.json",
+    type=click.Path(dir_okay=False, readable=True, path_type=str),
+    default=None,
     show_default=True,
-    help="Optional per-type orb-level additive weights JSON (per +3/6/9) upgrades.",
+    help="Optional per-type orb-level weights (tier 3/6/9) (default profile only).",
 )
-# Threshold shaping / blending
+# Default-profile knobs (ignored if profiles.json is provided)
+@click.option(
+    "--objective",
+    type=click.Choice(["sets-first", "types-first"]),
+    default="sets-first",
+    show_default=True,
+    help="Objective for default profile.",
+)
 @click.option(
     "--power",
     type=float,
     default=2.0,
     show_default=True,
-    help="Exponent applied to tiers_met to reward completion/concentration.",
+    help="Exponent applied to tiers_met to reward completion/concentration (default profile).",
 )
 @click.option(
     "--epsilon",
     type=float,
     default=0.02,
     show_default=True,
-    help="Small blend of secondary score into the primary score (try 0.01–0.05).",
+    help="Blend factor (keep small, e.g., 0.01–0.05) (default profile).",
 )
+# Multi-profile config (optional)
 @click.option(
-    "--objective",
-    type=click.Choice(["sets-first", "types-first"]),
-    default="sets-first",
+    "--profiles",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
+    default=None,
     show_default=True,
-    help="Choose which score is primary: set completion or orb type/level quality.",
+    help="Optional profiles.json enabling multiple profiles.",
 )
-# Refinement
+@click.option("--verbose", is_flag=True, help="Enable detailed debug logs.")
+@click.pass_context
+def cli(
+    ctx: click.Context,
+    orbs: str,
+    slots: str,
+    set_priority: str | None,
+    orb_weights: str | None,
+    orb_level_weights: str | None,
+    objective: str,
+    power: float,
+    epsilon: float,
+    profiles: str | None,
+    verbose: bool,
+):
+    """🧮 The Demonized Orb Optimizer"""
+    logger = setup_logger(verbose)
+    loader = DataLoader(logger)
+
+    logger.info("🚀 Loading input data...")
+    orb_data = loader.load_orbs(orbs)
+    cat_data = loader.load_categories(slots)
+
+    # Build profile(s)
+    if profiles:
+        profile_list, shareable = build_profiles_from_json(loader, profiles)
+    else:
+        profile_list = [build_default_profile(
+            loader,
+            set_priority_path=set_priority,
+            orb_weights_path=orb_weights,
+            orb_level_weights_path=orb_level_weights,
+            objective=objective,
+            power=power,
+            epsilon=epsilon,
+        )]
+        shareable = None
+
+    # Stash normalized inputs for all subcommands
+    ctx.obj = {
+        "logger": logger,
+        "loader": loader,
+        "inputs": Inputs(
+            orbs=orb_data,
+            categories=cat_data,
+            profiles=profile_list,
+            shareable_categories=shareable,
+        ),
+    }
+
+
+# ---------- Subcommand: beam/heuristic optimizer (current default) ----------
+@cli.command("beam")
+@click.option("--topk", type=int, default=20, show_default=True,
+              help="Per-profile Top-K combos kept per category (prunes candidate pairs).")
+@click.option("--beam", type=int, default=200, show_default=True, help="Beam width.")
 @click.option(
     "--refine-passes",
     type=int,
@@ -86,134 +145,46 @@ def cli():
 @click.option(
     "--refine-report",
     is_flag=True,
-    help="Print a compact before/after summary if refinement improves the result.",
+    help="Show before/after combined scores if refinement changed result.",
 )
-# Search & verbosity
-@click.option(
-    "--mode",
-    type=click.Choice(["beam", "full"]),
-    default="beam",
-    show_default=True,
-    help="Search strategy.",
-)
-@click.option(
-    "--beam",
-    type=int,
-    default=100,
-    show_default=True,
-    help="Beam width (beam mode only).",
-)
-@click.option("--verbose", is_flag=True, help="Enable detailed debug logs.")
-def optimize(
-    orbs,
-    slots,
-    set_priority,
-    orb_weights,
-    orb_level_weights,
-    power,
-    epsilon,
-    objective,
-    refine_passes,
-    refine_report,
-    mode,
-    beam,
-    verbose,
-):
-    """Optimize your orb configuration with thresholds-first scoring, then refine with quick local swaps."""
-    logger = setup_logger(verbose)
-    loader = DataLoader(logger)
+@click.pass_obj
+def cmd_optimize(shared: Dict[str, Any], topk: int, beam: int, refine_passes: int, refine_report: bool):
+    """Optimize via beam search + optional refine."""
+    logger = shared["logger"]
+    inputs: Inputs = shared["inputs"]
 
-    logger.info("🚀 Loading input data...")
-
-    # Required data
-    orb_data = loader.load_orbs(orbs)
-    cat_data = loader.load_categories(slots)
-    set_thresholds = loader.load_set_thresholds()
-
-    # Optional weights with defaults
-    set_priority_w = loader.load_set_priority_or_default(set_priority)
-    orb_type_w = loader.load_orb_type_weights_or_default(orb_weights)
-    level_w = loader.load_orb_level_weights_or_default(orb_level_weights)
-
-    optimizer = LoadoutOptimizer(
-        orbs=orb_data,
-        categories=cat_data,
+    uopt = UnifiedOptimizer(
+        inputs=inputs,
         logger=logger,
-        set_thresholds=set_thresholds,
-        set_priority=set_priority_w,
-        orb_type_weights=orb_type_w,
-        orb_level_weights=level_w,
-        power=power,
-        epsilon=epsilon,
-        objective=objective,
+        topk_per_category=topk,
     )
 
-    # Do the thing
-    logger.info("🏃‍♂️ Optimizing...")
-    search_result = optimizer.optimize(mode=mode, beam_width=beam)
-
-    base_loadout = search_result["loadout"]
-    base_set, base_orb, _ = optimizer._score_breakdown(base_loadout)
-    refined = (
-        optimizer.refine_loadout(base_loadout, max_passes=refine_passes)
-        if refine_passes > 0
-        else base_loadout
+    result = uopt.optimize(beam_width=beam)
+    
+    OptimizationReporter().emit(
+        result=result,
+        profiles=inputs.profiles,
+        categories=inputs.categories
     )
-    ref_set, ref_orb, details = optimizer._score_breakdown(refined)
-    total = ref_set + ref_orb
-    details["set_priority_score"] = ref_set
-    details["orb_quality_score"] = ref_orb
 
-    # Reporting
-    click.echo("\n✅ Optimization Complete!\n")
-    click.secho(f"🏆 Total Score: {total:.2f}", fg="green", bold=True)
-    click.echo(f"   • Set priority score: {details['set_priority_score']:.2f}")
-    click.echo(f"   • Orb quality score : {details['orb_quality_score']:.2f}")
-    click.echo(f"   • Epsilon           : {epsilon:.3g}")
-    if refine_passes > 0 and refine_report:
-        base_total = base_set + base_orb
-        delta = total - base_total
-        click.secho("\n🧽 Refine summary:", fg="yellow")
-        click.echo(f"   • Passes: {refine_passes}")
-        click.echo(
-            f"   • Before: total={base_total:.2f} (sets={base_set:.2f}, orbs={base_orb:.2f})"
-        )
-        click.echo(
-            f"   • After : total={total:.2f} (sets={ref_set:.2f}, orbs={ref_orb:.2f})"
-        )
-        sign = "+" if delta >= 0 else ""
-        click.echo(f"   • Δ Score: {sign}{delta:.2f}")
 
-    click.echo("\nLoadout:\n")
-    for cat, orbs_list in refined.items():
-        click.secho(f"[{cat}]", fg="blue")
-        for orb in orbs_list:
-            click.echo(
-                f"  • {orb.type} — {orb.set_name} ({orb.rarity}) +{orb.value}% (lvl {orb.level})"
-            )
-        click.echo()
+# ---------- Example future solver scaffold (to copy/paste) ----------
+@cli.command("greedy")
+@click.pass_obj
+def test(shared: Dict[str, Any]):
+    """placeholder for alternative optimization methods"""
+    logger = shared["logger"]
+    inputs: Inputs = shared["inputs"]
+    greedy = GreedyOptimizer(inputs=inputs, logger=logger)
 
-    click.secho("Active Sets (tiers met):", fg="yellow")
-    for sname, info in sorted(
-        details["sets"].items(), key=lambda kv: (-kv[1]["contribution"], kv[0])
-    ):
-        click.echo(
-            f"  • {sname}: pieces {info['count']}  "
-            f"tiers={info['tiers_met']}  W={info['priority']}  "
-            f"contrib={info['contribution']:.2f}"
-        )
+    result = greedy.optimize()
 
-    click.secho("Orb Type Summary:", fg="yellow")
-    type_counts, type_bonus = Counter(), Counter()
-    for cat, orbs_list in refined.items():
-        for orb in orbs_list:
-            type_counts[orb.type] += 1
-            type_bonus[orb.type] += orb.value
+    OptimizationReporter().emit(
+        result=result,
+        profiles=inputs.profiles,
+        categories=inputs.categories
+    )
 
-    for t in sorted(type_counts):
-        click.echo(
-            f"  • {t}: pieces={type_counts[t]} " f"total bonus={type_bonus[t]:.2f}"
-        )
 
 
 def main() -> None:

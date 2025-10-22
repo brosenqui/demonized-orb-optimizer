@@ -8,7 +8,12 @@ Includes:
 
 import logging
 import sys
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+from .models import ProfileConfig
+
+if TYPE_CHECKING:
+    from .data_loader import DataLoader
 
 # === Rarity mappings ===
 RARITY_SCORE: dict[str, int] = {
@@ -90,3 +95,59 @@ def parse_value(value: Any) -> float:
         except ValueError:
             return 0.0
     return 0.0
+
+def build_profiles_from_json(loader: "DataLoader", path: str) -> tuple[list[ProfileConfig], list[str]]:
+    """Read profiles.json and convert to ProfileConfig list."""
+    cfg = loader.load_json(path)
+    try:
+        profiles_json = cfg["profiles"]
+        if not isinstance(profiles_json, list):
+            raise TypeError
+    except (TypeError, KeyError):
+        raise ValueError("profiles.json must contain a 'profiles' array")
+
+    out: list[ProfileConfig] = []
+    for pj in profiles_json:
+        name = pj["name"]
+        set_prio = loader.load_set_priority_or_default(pj.get("set_priority"))
+        type_w = loader.load_orb_type_weights_or_default(pj.get("orb_weights"))
+        lvl_w = loader.load_orb_level_weights_or_default(pj.get("orb_level_weights"))
+        out.append(
+            ProfileConfig(
+                name=name,
+                set_priority=set_prio,
+                orb_type_weights=type_w,
+                orb_level_weights=lvl_w,
+                power=float(pj.get("power", 2.0)),
+                epsilon=float(pj.get("epsilon", 0.02)),  # keep aligned with CLI default
+                objective=pj.get("objective", "sets-first"),
+                weight=float(pj.get("weight", 1.0)),
+            )
+        )
+    shareable = list(cfg.get("shareable_categories", []))
+    return out, shareable
+
+
+def build_default_profile(
+    loader: "DataLoader",
+    *,
+    set_priority_path: str | None,
+    orb_weights_path: str | None,
+    orb_level_weights_path: str | None,
+    objective: str,
+    power: float,
+    epsilon: float,
+) -> ProfileConfig:
+    set_prio = loader.load_set_priority_or_default(set_priority_path)
+    type_w = loader.load_orb_type_weights_or_default(orb_weights_path)
+    lvl_w = loader.load_orb_level_weights_or_default(orb_level_weights_path)
+    return ProfileConfig(
+        name="DEFAULT",
+        set_priority=set_prio,
+        orb_type_weights=type_w,
+        orb_level_weights=lvl_w,
+        power=power,
+        epsilon=epsilon,
+        objective=objective,
+        weight=1.0,
+    )
