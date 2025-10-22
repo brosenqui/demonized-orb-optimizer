@@ -122,7 +122,7 @@ class OrbLevelSpec:
         return base * mul_prod + add_sum
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class ProfileConfig:
     """Configuration for a single profile (e.g., PVP or PVE)."""
 

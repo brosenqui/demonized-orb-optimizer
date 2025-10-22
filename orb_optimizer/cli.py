@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 import json
-import logging
 import click
 
 from .data_loader import DataLoader
@@ -188,7 +186,7 @@ def optimize(
         logger=logger,
         profiles=profile_list,
         shareable_categories=shareable_categories,
-        topk_per_category=topk
+        topk_per_category=topk,
     )
 
     result = uopt.optimize(beam_width=beam)

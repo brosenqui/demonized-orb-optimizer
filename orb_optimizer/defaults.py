@@ -4,9 +4,9 @@ DEFAULT_SET_PRIORITY_WEIGHTS: dict[str, float] = {
     "Leviathan": 8.0,
     "Beezlebub": 6.0,
     "Belphegor": 5.0,
-    "Asmodeus": 3.0,
-    "Mammon": 2.0,
-    "Satan": 1.5,
+    "Asmodeus": 1.5,
+    "Mammon": 1.1,
+    "Satan": 1.0,
     "Lucifer": 1.0,
 }
 
@@ -32,6 +32,7 @@ DEFAULT_LEVEL_CAPS: dict[str, int] = {
     "Mythic": 9,
 }
 
+# Valid set piece counts
 DEFAULT_SET_COUNTS: dict[str, list[int]] = {
     "Lucifer": [4, 5],
     "Mammon": [2, 4, 6],
