@@ -1,3 +1,4 @@
+# apps/cli/main.py
 """Command-line interface for orb optimizer"""
 
 from __future__ import annotations
@@ -6,12 +7,14 @@ from typing import Any, Dict
 
 import click
 
-from .data_loader import DataLoader
-from .solvers.beam import UnifiedOptimizer
-from .solvers.greedy import GreedyOptimizer
-from .models import Inputs
-from .reporter import OptimizationReporter
-from .utils import setup_logger, build_default_profile, build_profiles_from_json
+from orb_optimizer.io.loader import Loader as DataLoader
+
+from orb_optimizer.solvers.beam import UnifiedOptimizer
+from orb_optimizer.solvers.greedy import GreedyOptimizer
+from orb_optimizer.models import Inputs
+from orb_optimizer.reporter import OptimizationReporter
+from orb_optimizer.utils import setup_logger, build_default_profile, build_profiles_from_json
+
 
 # ---------- Root group: loads everything once ----------
 @click.group()
@@ -99,11 +102,12 @@ def cli(
     loader = DataLoader(logger)
 
     logger.info("🚀 Loading input data...")
-    orb_data = loader.load_orbs(orbs)
+    orb_data = loader.load_orbs(orbs)       # accepts path or Source object
     cat_data = loader.load_categories(slots)
 
     # Build profile(s)
     if profiles:
+        # Keeps your existing helper intact
         profile_list, shareable = build_profiles_from_json(loader, profiles)
     else:
         profile_list = [build_default_profile(
@@ -151,7 +155,7 @@ def cli(
 def cmd_optimize(shared: Dict[str, Any], topk: int, beam: int, refine_passes: int, refine_report: bool):
     """Optimize via beam search + optional refine."""
     logger = shared["logger"]
-    inputs: Inputs = shared["inputs"]
+    inputs = shared["inputs"]
 
     uopt = UnifiedOptimizer(
         inputs=inputs,
@@ -160,7 +164,7 @@ def cmd_optimize(shared: Dict[str, Any], topk: int, beam: int, refine_passes: in
     )
 
     result = uopt.optimize(beam_width=beam)
-    
+
     OptimizationReporter().emit(
         result=result,
         profiles=inputs.profiles,
@@ -168,13 +172,13 @@ def cmd_optimize(shared: Dict[str, Any], topk: int, beam: int, refine_passes: in
     )
 
 
-# ---------- Example future solver scaffold (to copy/paste) ----------
+# ---------- Greedy (placeholder / alt solver) ----------
 @cli.command("greedy")
 @click.pass_obj
 def test(shared: Dict[str, Any]):
     """placeholder for alternative optimization methods"""
     logger = shared["logger"]
-    inputs: Inputs = shared["inputs"]
+    inputs = shared["inputs"]
     greedy = GreedyOptimizer(inputs=inputs, logger=logger)
 
     result = greedy.optimize()
@@ -184,7 +188,6 @@ def test(shared: Dict[str, Any]):
         profiles=inputs.profiles,
         categories=inputs.categories
     )
-
 
 
 def main() -> None:
