@@ -5,7 +5,7 @@ import {
   Density,
   gridClassForDensity,
   showDetailsForDensity,
-} from "./orbDisplay";
+} from "./OrbDisplay";
 
 type OrbGridProps = {
   orbs: OrbIn[];

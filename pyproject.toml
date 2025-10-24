@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "orb-optimizer"
 version = "0.1.0"
 description = "Optimizer core with CLI and FastAPI API for Demonized orbs"
-readme = "README.md"
+readme = "README.MD"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "arosenquist" }]
