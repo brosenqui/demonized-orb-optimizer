@@ -49,6 +49,7 @@ COPY pyproject.toml ./
 RUN uv venv "$VIRTUAL_ENV" && \
     uv sync --no-dev --no-install-project --extra api
 
+
 # ===========================================
 # Stage 3: Runtime (app + prebuilt web + venv)
 # ===========================================
@@ -65,30 +66,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy prebuilt venv (contains all third-party deps incl. FastAPI)
+# Copy prebuilt venv (contains all third-party deps incl. FastAPI/uvicorn)
 COPY --from=pydeps /opt/venv /opt/venv
-# Copy uv binary to runtime so we can install project with uv too
-COPY --from=pydeps /usr/local/bin/uv /usr/local/bin/uv
 
 # Copy app source
 COPY . .
 
 COPY README.MD .
 
-# Install your project ONLY (no deps) with uv
-# If you need the 'api' extra at runtime (e.g., entry_points), keep it here too:
-RUN uv pip install --no-deps ".[api]"
+# Install your project ONLY (no deps) into the prebuilt venv
+RUN pip install --no-deps '.[api]'
 
 # Copy built frontend
 COPY --from=webbuilder /app/web/dist ./web_dist
 
+# Runtime configuration
 ENV PORT=8080 \
     APP_MODULE=apps.api.main:app \
     FRONTEND_DIST=/app/web_dist
 
-# Healthcheck (adjust path to your existing health route)
+# Healthcheck (works with env var; defaults to 8080 if unset)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
+  CMD sh -c 'curl -fsS "http://127.0.0.1:${PORT:-8080}/health" || exit 1'
 
-CMD uv run uvicorn "$APP_MODULE" \
-    --bind 0.0.0.0:"$PORT" 
+# Start the server using env vars; ensure PID 1 is uvicorn
+CMD sh -c 'exec python -m uvicorn "$APP_MODULE" --host 0.0.0.0 --port "${PORT:-8080}"'
