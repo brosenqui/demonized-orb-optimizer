@@ -40,11 +40,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && uv --version
 
 WORKDIR /app
-COPY pyproject.toml uv.lock* README.MD ./
+COPY pyproject.toml README.MD ./
 
 # Build venv with deps only
 # If you don't have uv.lock committed, remove --frozen
-RUN uv venv "$VIRTUAL_ENV" && uv sync --extra api
+RUN uv venv "$VIRTUAL_ENV" && uv sync --no-dev --no-install-project
 
 # ===========================================
 # Stage 3: Runtime (app + prebuilt web + venv)
@@ -68,10 +68,9 @@ COPY --from=pydeps /opt/venv /opt/venv
 # Copy app source
 COPY . .
 
-# Install your app only (deps already in venv)
 RUN pip install --upgrade pip && \
     pip install "uvicorn[standard]" "gunicorn" && \
-    pip install --no-deps .
+    pip install --no-deps ".[api]"
 
 # Copy built frontend
 COPY --from=webbuilder /app/web/dist ./web_dist
