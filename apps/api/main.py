@@ -1,60 +1,87 @@
 # apps/api/main.py
 from __future__ import annotations
 
+import os
 import logging
-from pathlib import Path
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from typing import Iterable
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from .routers import health, optimize
+from apps.api.routers.optimize import router as optimize_router
+from apps.api.routers.health import router as health_router
+
+# Any top-level prefixes that should NOT be captured by the SPA fallback.
+SPA_EXCLUDE_PREFIXES: tuple[str, ...] = (
+    "optimize",
+    "assets",
+    "api",
+    "health",
+    "version",
+)
+
+
+def _setup_logger() -> logging.Logger:
+    logger = logging.getLogger("api")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        h = logging.StreamHandler()
+        h.setFormatter(logging.Formatter("[API] %(asctime)s | %(levelname)s | %(message)s"))
+        logger.addHandler(h)
+    logger.propagate = False
+    return logger
+
+
+def _is_spa_excluded(path: str, exclude_prefixes: Iterable[str]) -> bool:
+    clean = path.lstrip("/")
+    head = clean.split("/", 1)[0] if clean else ""
+    return head in exclude_prefixes
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Orb Optimizer API", version="0.1.0")
+    app = FastAPI(title="Demonized Orb Optimizer API", version="1.0.0")
 
-    # ---------- Logging ----------
-    # Create a logger specifically for the API layer
-    logger = logging.getLogger("orb_api")
-    logger.setLevel(logging.INFO)
-
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "[API] %(asctime)s | %(levelname)s | %(message)s", "%H:%M:%S"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
-    # FastAPI uses uvicorn’s logger; we can adjust its format slightly if desired
-    uvicorn_logger = logging.getLogger("uvicorn.access")
-    uvicorn_logger.handlers.clear()
-    uvicorn_logger.addHandler(handler)
-
-    # Store the logger on the app so routers can access it
+    # ---- Logger ----
+    logger = _setup_logger()
     app.state.logger = logger
-    logger.info("🛰️  Orb Optimizer API starting up...")
 
-    # ---------- Routers ----------
-    app.include_router(health.router, prefix="", tags=["health"])
-    app.include_router(optimize.router, prefix="", tags=["optimize"])
+    # ---- Middleware ----
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-    # ---------- CORS ----------
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # ---- Routers ----
+    app.include_router(optimize_router, tags=["optimize"])
+    app.include_router(health_router, tags=["meta"])
 
-    # ---------- Optional static build ----------
-    build_dir = Path(__file__).resolve().parents[2] / "web" / "dist"
-    if build_dir.exists():
-        app.mount("/assets", StaticFiles(directory=build_dir / "assets"), name="assets")
-        @app.get("/{full_path:path}", include_in_schema=False)
-        def spa(full_path: str):
-            from fastapi.responses import FileResponse
-            return FileResponse(build_dir / "index.html")
+    # ---- Frontend (static) ----
+    dist = os.getenv("FRONTEND_DIST", "")
+    if dist and os.path.isdir(dist):
+        assets_dir = os.path.join(dist, "assets")
+        if os.path.isdir(assets_dir):
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        index_file = os.path.join(dist, "index.html")
+
+        # NOTE: don't annotate return type with a union of response classes.
+        @app.get("/", include_in_schema=False, response_model=None)
+        async def index():
+            if os.path.isfile(index_file):
+                return FileResponse(index_file)
+            return PlainTextResponse("Frontend not built", status_code=503)
+
+        @app.get("/{full_path:path}", include_in_schema=False, response_model=None)
+        async def spa_fallback(full_path: str, request: Request):
+            # Don't intercept API/health/etc.
+            if _is_spa_excluded(full_path, SPA_EXCLUDE_PREFIXES):
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            if os.path.isfile(index_file):
+                return FileResponse(index_file)
+            return JSONResponse({"error": "Frontend not available"}, status_code=503)
+
+        logger.info("Frontend mounted from %s", dist)
+    else:
+        logger.warning("FRONTEND_DIST not set or missing. API will run without serving the UI.")
 
     return app
 
