@@ -40,7 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && uv --version
 
 WORKDIR /app
-COPY pyproject.toml uv.lock* ./
+COPY pyproject.toml uv.lock* README* ./
 
 # Build venv with deps only
 # If you don't have uv.lock committed, remove --frozen
