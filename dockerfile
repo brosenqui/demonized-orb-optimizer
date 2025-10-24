@@ -90,8 +90,5 @@ ENV PORT=8080 \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
-CMD exec gunicorn "$APP_MODULE" \
-    --bind 0.0.0.0:"$PORT" \
-    --workers 2 \
-    --worker-class uvicorn.workers.UvicornWorker \
-    --timeout 120
+CMD uv run uvicorn "$APP_MODULE" \
+    --bind 0.0.0.0:"$PORT" 
