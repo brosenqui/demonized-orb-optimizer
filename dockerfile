@@ -20,6 +20,7 @@ ENV VITE_API_BASE_URL="${VITE_API_BASE_URL}"
 RUN npm run build
 # -> /app/web/dist
 
+
 # ==============================================
 # Stage 2: Build Python deps with uv (venv only)
 # ==============================================
@@ -36,15 +37,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-# Install uv (no -y)
+# Install uv and verify
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && uv --version
 
 WORKDIR /app
-COPY pyproject.toml README.MD ./
 
-# Build venv with deps only
-# If you don't have uv.lock committed, remove --frozen
-RUN uv venv "$VIRTUAL_ENV" && uv sync --no-dev --no-install-project
+# Copy only resolver inputs to maximize cache reuse
+COPY pyproject.toml ./
+
+# Create venv and sync third-party deps (include API extras)
+RUN uv venv "$VIRTUAL_ENV" && \
+    uv sync --no-dev --no-install-project --extra api
 
 # ===========================================
 # Stage 3: Runtime (app + prebuilt web + venv)
@@ -62,15 +65,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy prebuilt Python venv (deps)
+# Copy prebuilt venv (contains all third-party deps incl. FastAPI)
 COPY --from=pydeps /opt/venv /opt/venv
+# Copy uv binary to runtime so we can install project with uv too
+COPY --from=pydeps /usr/local/bin/uv /usr/local/bin/uv
 
 # Copy app source
 COPY . .
 
-RUN pip install --upgrade pip && \
-    pip install "uvicorn[standard]" "gunicorn" && \
-    pip install --no-deps ".[api]"
+COPY README.MD .
+
+# Install your project ONLY (no deps) with uv
+# If you need the 'api' extra at runtime (e.g., entry_points), keep it here too:
+RUN uv pip install --no-deps ".[api]"
 
 # Copy built frontend
 COPY --from=webbuilder /app/web/dist ./web_dist
@@ -79,7 +86,7 @@ ENV PORT=8080 \
     APP_MODULE=apps.api.main:app \
     FRONTEND_DIST=/app/web_dist
 
-# Healthcheck (your health route can be elsewhere; adjust path if needed)
+# Healthcheck (adjust path to your existing health route)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
