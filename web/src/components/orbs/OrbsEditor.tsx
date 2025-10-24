@@ -24,6 +24,7 @@ import OrbGrid from "./OrbGrid";
 import type { OrbIn } from "../../lib/types";
 import { ORB_TYPES, ORB_SETS } from "../../lib/orbData";
 import { Density, normalizeOrb, clamp } from "./OrbDisplay";
+import { HelpTooltip } from "../ui/helpToolTip";
 
 // --- Add/Edit form state type ---
 type OrbFormState = {
@@ -150,6 +151,7 @@ export default function OrbsEditor({
   return (
     <Section
       title="Orbs"
+      helpText="Enter and manage your collection of orbs here. You can add orbs manually, import JSON, and adjust the display density of the orb grid."
       actions={
         <div className="flex gap-2 items-center">
           {/* Density selector */}

@@ -12,6 +12,7 @@ import {
 import KvSelectTable from "../ui/KvSelectTable";
 import { objectiveOptions, type OptimizeProfileIn, type Rarity } from "../../lib/types";
 import { cn } from "../../lib/utils";
+import { HelpTooltip } from "../ui/helpToolTip";
 
 // rarity styles + mapping
 const rarityBgClass: Record<Rarity, string> = {
@@ -55,7 +56,12 @@ export default function ProfileCard({
       {/* Header row: name + weight */}
       <div className="grid grid-cols-1 md:grid-cols-[1fr_160px] gap-3">
         <div className="space-y-1">
-          <Label htmlFor={`profile-name-${value.name}`}>Profile name</Label>
+          {/* group label + tooltip */}
+          <div className="flex items-center gap-2">
+            <Label htmlFor={`profile-name-${value.name}`}>Profile name</Label>
+            <HelpTooltip text="A descriptive name for this optimization profile." />
+          </div>
+
           <Input
             id={`profile-name-${value.name}`}
             placeholder="Profile name"
@@ -64,7 +70,10 @@ export default function ProfileCard({
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor={`profile-weight-${value.name}`}>Weight</Label>
+          <div className="flex items-center gap-2">
+            <Label htmlFor={`profile-weight-${value.name}`}>Weight</Label>
+            <HelpTooltip text="The relative importance of this profile when optimizing. Higher weight means the optimizer will prioritize this profile's objectives more." />
+          </div>
           <Input
             id={`profile-weight-${value.name}`}
             type="number"
@@ -80,7 +89,10 @@ export default function ProfileCard({
       {/* Objective / Power / Epsilon */}
       <div className="grid md:grid-cols-3 gap-3">
         <div className="space-y-1">
-          <Label>Objective</Label>
+          <div className="flex items-center gap-2">
+            <Label>Objective</Label>
+            <HelpTooltip text="The main goal of this profile during optimization. Choose an objective that aligns with your desired outcome for orb selection." />
+          </div>
           <Select
             value={value.objective}
             onValueChange={(val) =>
@@ -104,7 +116,10 @@ export default function ProfileCard({
         </div>
 
         <div className="space-y-1">
-          <Label htmlFor={`profile-power-${value.name}`}>Power</Label>
+          <div className="flex items-center gap-2">
+            <Label htmlFor={`profile-power-${value.name}`}>Power</Label>
+            <HelpTooltip text="Determines how strongly this profile's objective influences orb selection. A higher power value increases the emphasis on this profile's goals during optimization." />
+          </div>
           <Input
             id={`profile-power-${value.name}`}
             type="number"
@@ -117,7 +132,10 @@ export default function ProfileCard({
         </div>
 
         <div className="space-y-1">
-          <Label htmlFor={`profile-eps-${value.name}`}>Epsilon</Label>
+          <div className="flex items-center gap-2">
+            <Label htmlFor={`profile-eps-${value.name}`}>Epsilon</Label>
+            <HelpTooltip text="A small tolerance value that helps prevent overfitting to this profile's objectives. It allows for some flexibility in orb selection, ensuring a more balanced optimization." />
+          </div>
           <Input
             id={`profile-eps-${value.name}`}
             type="number"
@@ -188,7 +206,10 @@ export default function ProfileCard({
       {/* Set Priority / Orb Weights / Orb Level Weights */}
       <div className="grid md:grid-cols-3 gap-4">
         <div>
-          <h4 className="font-medium mb-1">Set Priority</h4>
+          <div className="flex items-center gap-2">
+            <h4 className="font-medium mb-1">Set Priority</h4>
+            <HelpTooltip text="Assign priority levels to different orb sets for this profile. Higher priority sets will be favored during optimization, influencing the selection of orbs based on your preferences." />
+          </div>
           <KvSelectTable
             value={value.set_priority}
             onChange={(next) => onChange({ ...value, set_priority: next })}
@@ -200,7 +221,10 @@ export default function ProfileCard({
         </div>
 
         <div>
-          <h4 className="font-medium mb-1">Orb Weights</h4>
+          <div className="flex items-center gap-2">
+            <h4 className="font-medium mb-1">Orb Weights</h4>
+            <HelpTooltip text="Define weights for different orb types for this profile. Higher weights increase the likelihood of selecting those orb types during optimization, allowing you to tailor the orb selection process to your strategy." />
+          </div>
           <KvSelectTable
             value={value.orb_weights}
             onChange={(next) => onChange({ ...value, orb_weights: next })}
@@ -212,7 +236,10 @@ export default function ProfileCard({
         </div>
 
         <div>
-          <h4 className="font-medium mb-1">Orb Level Weights</h4>
+          <div className="flex items-center gap-2">
+            <h4 className="font-medium mb-1">Orb Level Weights</h4>
+            <HelpTooltip text="Set weights for different orb levels for this profile. Higher level weights will influence the optimizer to favor orbs with higher levels during selection, helping you achieve your desired orb distribution." />
+          </div>
           <KvSelectTable
             value={value.orb_level_weights}
             onChange={(next) =>

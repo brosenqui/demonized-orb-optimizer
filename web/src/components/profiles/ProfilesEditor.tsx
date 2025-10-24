@@ -71,6 +71,7 @@ export default function ProfilesEditor({
   return (
     <Section
       title="Profiles"
+      helpText="Define optimization profiles to guide how orbs are selected during optimization. Each profile can prioritize different sets, orb types, and objectives."
       actions={
         <div className="flex items-center gap-2">
           <ShareablePicker value={shareable} onChange={setShareable} />
