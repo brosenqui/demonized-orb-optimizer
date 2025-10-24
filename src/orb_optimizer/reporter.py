@@ -29,7 +29,7 @@ try:
 except Exception:  # pragma: no cover
     click = None  # Fallback for non-CLI test contexts
 
-from .models import Orb, Category, ProfileConfig
+from .models import Orb, Category, ProfileConfig, MultiProfileResult, AssignedOrb
 from .defaults import DEFAULT_SET_COUNTS
 
 
@@ -65,25 +65,24 @@ class OptimizationReporter:
     def emit(
         self,
         *,
-        result: Dict[str, Any],
+        result: MultiProfileResult,
         profiles: List[ProfileConfig],
-        categories: List[Category],
         options: Optional[ReportOptions] = None,
     ) -> None:
         opts = options or ReportOptions()
 
         self._print_header("✅ Optimization Complete!", color="green", bold=True)
-        self._print_kv("🏆 Combined Score (primary)", f"{result.get('combined_score', 0.0):.2f}", strong=True)
+        self._print_kv("🏆 Combined Score (primary)", f"{result.combined_score:.2f}", strong=True)
 
         if opts.show_refine and opts.base_result is not None:
             self._emit_refine_summary(opts.base_result, result, passes=opts.refine_passes)
 
         # Per-profile sections
         for p in profiles:
-            pdata = result["profiles"][p.name]
-            loadout = pdata["loadout"]
-            set_s = pdata["set_score"]
-            orb_s = pdata["orb_score"]
+            pdata = result.profiles[p.name]
+            loadout = pdata.loadout
+            set_s = pdata.set_score
+            orb_s = pdata.orb_score
 
             self._print_header(f"[{p.name}] Loadout", color="blue", bold=True)
             self._print_kv("• Set score", f"{set_s:.2f}")
@@ -91,14 +90,11 @@ class OptimizationReporter:
             self._println("")
 
             # Loadout details by category
-            for i, cat in enumerate(categories):
-                if i >= opts.max_categories_to_show:
-                    self._println(f"... ({len(categories)-i} more categories not shown)")
-                    break
+            for i, cat in enumerate(p.categories):
                 self._print_line(cat.name, color="blue")
                 for orb in loadout[cat.name]:
                     self._println(
-                        f"  • {orb.type} — {orb.set_name} ({orb.rarity}) "
+                        f"  • {orb.type} — {orb.set} ({orb.rarity}) "
                         f"+{orb.value}% (lvl {getattr(orb, 'level', 0)})"
                     )
                 self._println("")
@@ -156,8 +152,8 @@ class OptimizationReporter:
         self._println("")
 
     # ---- helpers ----
-    def _active_sets_table(self, loadout: Dict[str, List[Orb]], prof: ProfileConfig) -> List[Dict[str, Any]]:
-        counts = Counter(o.set_name for group in loadout.values() for o in group)
+    def _active_sets_table(self, loadout: Dict[str, List[AssignedOrb]], prof: ProfileConfig) -> List[Dict[str, Any]]:
+        counts = Counter(o.set for group in loadout.values() for o in group)
         rows: List[Dict[str, Any]] = []
         for sname, c in counts.items():
             th = DEFAULT_SET_COUNTS.get(sname, [])

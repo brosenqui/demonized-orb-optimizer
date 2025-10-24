@@ -1,4 +1,3 @@
-# apps/cli/main.py
 """Command-line interface for orb optimizer"""
 
 from __future__ import annotations
@@ -7,14 +6,16 @@ from typing import Any, Dict
 
 import click
 
-from orb_optimizer.io.loader import Loader as DataLoader
-
+from orb_optimizer.data_loader import DataLoader
 from orb_optimizer.solvers.beam import UnifiedOptimizer
 from orb_optimizer.solvers.greedy import GreedyOptimizer
 from orb_optimizer.models import Inputs
 from orb_optimizer.reporter import OptimizationReporter
-from orb_optimizer.utils import setup_logger, build_default_profile, build_profiles_from_json
-
+from orb_optimizer.utils import (
+    setup_logger,
+    build_default_profile,
+    build_profiles_from_json,
+)
 
 # ---------- Root group: loads everything once ----------
 @click.group()
@@ -28,7 +29,7 @@ from orb_optimizer.utils import setup_logger, build_default_profile, build_profi
     "--slots",
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
     required=True,
-    help="Path to slots.json (REQUIRED).",
+    help="Path to slots.json (REQUIRED). Used as default per-profile categories if a profile doesn't specify its own.",
 )
 # Optional weights (used when profiles.json is NOT provided)
 @click.option(
@@ -80,7 +81,7 @@ from orb_optimizer.utils import setup_logger, build_default_profile, build_profi
     type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
     default=None,
     show_default=True,
-    help="Optional profiles.json enabling multiple profiles.",
+    help="Optional profiles.json enabling multiple profiles. Each profile may specify 'slots' or 'category_rarity'.",
 )
 @click.option("--verbose", is_flag=True, help="Enable detailed debug logs.")
 @click.pass_context
@@ -102,23 +103,31 @@ def cli(
     loader = DataLoader(logger)
 
     logger.info("🚀 Loading input data...")
-    orb_data = loader.load_orbs(orbs)       # accepts path or Source object
-    cat_data = loader.load_categories(slots)
+    orb_data = loader.load_orbs(orbs)
 
-    # Build profile(s)
+    # Load default slots map from slots.json (as a dict)
+    default_slots_map = loader.load_json(slots)
+    if not isinstance(default_slots_map, dict):
+        raise click.UsageError("slots.json must be an object mapping category -> slots")
+
+    # Build profile(s) WITH categories
     if profiles:
-        # Keeps your existing helper intact
-        profile_list, shareable = build_profiles_from_json(loader, profiles)
+        profile_list, shareable = build_profiles_from_json(
+            loader, profiles, default_slots=default_slots_map
+        )
     else:
-        profile_list = [build_default_profile(
-            loader,
-            set_priority_path=set_priority,
-            orb_weights_path=orb_weights,
-            orb_level_weights_path=orb_level_weights,
-            objective=objective,
-            power=power,
-            epsilon=epsilon,
-        )]
+        profile_list = [
+            build_default_profile(
+                loader,
+                set_priority_path=set_priority,
+                orb_weights_path=orb_weights,
+                orb_level_weights_path=orb_level_weights,
+                objective=objective,
+                power=power,
+                epsilon=epsilon,
+                default_slots=default_slots_map,
+            )
+        ]
         shareable = None
 
     # Stash normalized inputs for all subcommands
@@ -127,8 +136,7 @@ def cli(
         "loader": loader,
         "inputs": Inputs(
             orbs=orb_data,
-            categories=cat_data,
-            profiles=profile_list,
+            profiles=profile_list,                 # <-- categories now live inside each profile
             shareable_categories=shareable,
         ),
     }
@@ -139,54 +147,39 @@ def cli(
 @click.option("--topk", type=int, default=20, show_default=True,
               help="Per-profile Top-K combos kept per category (prunes candidate pairs).")
 @click.option("--beam", type=int, default=200, show_default=True, help="Beam width.")
-@click.option(
-    "--refine-passes",
-    type=int,
-    default=2,
-    show_default=True,
-    help="Number of greedy local-improvement passes after search (0 to disable).",
-)
-@click.option(
-    "--refine-report",
-    is_flag=True,
-    help="Show before/after combined scores if refinement changed result.",
-)
+@click.option("--refine-passes", type=int, default=2, show_default=True,
+              help="Number of greedy local-improvement passes after search (0 to disable).")
+@click.option("--refine-report", is_flag=True,
+              help="Show before/after combined scores if refinement changed result.")
 @click.pass_obj
 def cmd_optimize(shared: Dict[str, Any], topk: int, beam: int, refine_passes: int, refine_report: bool):
     """Optimize via beam search + optional refine."""
     logger = shared["logger"]
-    inputs = shared["inputs"]
+    inputs: Inputs = shared["inputs"]
 
-    uopt = UnifiedOptimizer(
-        inputs=inputs,
-        logger=logger,
-        topk_per_category=topk,
-    )
-
+    uopt = UnifiedOptimizer(inputs=inputs, logger=logger, topk_per_category=topk)
     result = uopt.optimize(beam_width=beam)
 
     OptimizationReporter().emit(
         result=result,
-        profiles=inputs.profiles,
-        categories=inputs.categories
+        profiles=[p for p in inputs.profiles]
     )
 
 
-# ---------- Greedy (placeholder / alt solver) ----------
+# ---------- Greedy (unified multi-profile) ----------
 @cli.command("greedy")
 @click.pass_obj
-def test(shared: Dict[str, Any]):
-    """placeholder for alternative optimization methods"""
+def cmd_greedy(shared: Dict[str, Any]):
+    """Greedy optimizer (single pass across all profiles)."""
     logger = shared["logger"]
-    inputs = shared["inputs"]
-    greedy = GreedyOptimizer(inputs=inputs, logger=logger)
+    inputs: Inputs = shared["inputs"]
 
+    greedy = GreedyOptimizer(inputs=inputs, logger=logger)
     result = greedy.optimize()
 
     OptimizationReporter().emit(
         result=result,
-        profiles=inputs.profiles,
-        categories=inputs.categories
+        profiles=[p for p in inputs.profiles]
     )
 
 

@@ -46,7 +46,7 @@ def parse_orbs(data: Any, logger: "Logger | None" = None) -> List[Orb]:
         out.append(
             Orb(
                 type=str(item["type"]),
-                set_name=str(item["set"]),
+                set=str(item["set"]),
                 rarity=str(item["rarity"]),
                 value=parse_value(item["value"]),
                 level=lvl,

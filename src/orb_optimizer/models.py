@@ -3,9 +3,11 @@
 This module defines dataclasses that represent the main entities in the orb optimization system
 """
 
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Literal, Any
 
+Objective = Literal["sets-first", "types-first"]
 
 @dataclass(slots=True)
 class Orb:
@@ -13,21 +15,21 @@ class Orb:
 
     Attributes:
         type: The orb type (e.g., 'Steel', 'Flame', 'Wind').
-        set_name: The set this orb belongs to (e.g., 'Leviathan').
+        set: The set this orb belongs to (e.g., 'Leviathan').
         rarity: The rarity tier of the orb (e.g., 'Rare', 'Legendary').
         value: The numeric value representing this orb's stat bonus.
         level: The orb's current upgrade level (default 0).
     """
 
     type: str
-    set_name: str
+    set: str
     rarity: str
     value: float
     level: int = 0
 
     def __repr__(self) -> str:
         return (
-            f"Orb(type='{self.type}', set='{self.set_name}', "
+            f"Orb(type='{self.type}', set='{self.set}', "
             f"rarity='{self.rarity}', value={self.value}, level={self.level})"
         )
 
@@ -121,23 +123,44 @@ class OrbLevelSpec:
                     mul_prod *= t.value
         return base * mul_prod + add_sum
 
-
 @dataclass(slots=True, frozen=True)
 class ProfileConfig:
-    """Configuration for a single profile (e.g., PVP or PVE)."""
+    """Configuration for profiles (e.g., PVP or PVE)."""
 
     name: str
+    objective: Objective
     set_priority: Dict[str, float]
     orb_type_weights: Dict[str, float]
     orb_level_weights: Dict[str, float]
     power: float = 2.0
     epsilon: float = 0.0
-    objective: str = "sets-first"  # "sets-first" | "types-first"
     weight: float = 1.0  # contribution to combined objective
+    categories: List[Category] = field(default_factory=list)
 
-@dataclass(frozen=True)
+@dataclass
 class Inputs:
-    orbs: Any                            # List[Orb]
-    categories: Any                      # List[Category]
-    profiles: List[ProfileConfig]        # normalized, ready to use
-    shareable_categories: Optional[List[str]]
+    orbs: List[Orb]
+    profiles: List[ProfileConfig]
+    shareable_categories: Optional[List[str]] = None
+
+@dataclass
+class AssignedOrb:
+    type: str
+    set: str
+    rarity: str
+    level: int
+    value: float
+    slot_index: Optional[int] = None  # for display/debug
+
+@dataclass
+class ProfileResult:
+    name: str
+    set_score: float
+    orb_score: float
+    # category -> list of assigned orbs
+    loadout: Dict[str, List[AssignedOrb]]
+
+@dataclass
+class MultiProfileResult:
+    profiles: Dict[str, ProfileResult]
+    combined_score: float

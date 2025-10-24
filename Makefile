@@ -7,6 +7,8 @@
 # ----------------------------
 PROJECT_ENV ?= .venv
 UV ?= uv
+WEB_DIR ?= web
+NPM ?= npm
 
 # Default data paths (override on CLI: make run-beam ORBS=... SLOTS=... PROFILES=...)
 ORBS     ?= data/orbs.json
@@ -125,28 +127,34 @@ api-docs:
 	@([ "$$(command -v open)" ] && open http://localhost:8000/docs) || true
 
 # ----------------------------
-# Web (optional React app in ./web)
+# Website (Vite + React)
 # ----------------------------
 
-## Run Vite dev server (CORS to FastAPI)
+## Install frontend deps
+web-install:
+	@echo "$(YELLOW)📦 Installing frontend dependencies...$(RESET)"
+	@cd $(WEB_DIR) && $(NPM) install
+	@echo "$(GREEN)✅ Frontend dependencies installed.$(RESET)"
+
+## Run Vite dev server (proxies to FastAPI)
 web-dev:
-	@echo "$(BLUE)🧩 Starting web dev server (Vite) ...$(RESET)"
+	@echo "$(BLUE)🧩 Starting web dev server (Vite)...$(RESET)"
 	@cd $(WEB_DIR) && $(NPM) run dev
 
 ## Build static bundle to web/dist
 web-build:
-	@echo "$(BLUE)🧱 Building web bundle ...$(RESET)"
-	@cd $(WEB_DIR) && $(NPM) ci && $(NPM) run build
+	@echo "$(BLUE)🧱 Building frontend for production...$(RESET)"
+	@cd $(WEB_DIR) && $(NPM) run build
 	@echo "$(GREEN)✅ web/dist ready.$(RESET)"
 
-## Preview built bundle (Vite preview)
+## Preview built bundle (serves dist on localhost:4173)
 web-preview:
-	@echo "$(BLUE)👀 Previewing built web bundle ...$(RESET)"
+	@echo "$(BLUE)👀 Previewing built bundle...$(RESET)"
 	@cd $(WEB_DIR) && $(NPM) run preview
 
-## Build web then serve via FastAPI static mount (see apps/api/main.py)
+## Build web and serve via FastAPI's static mount
 serve: web-build
-	@echo "$(BLUE)🖥  Serving web/dist via FastAPI on :8000 ...$(RESET)"
+	@echo "$(BLUE)🖥 Serving built web via FastAPI on :8000 ...$(RESET)"
 	@$(UV_ENV) $(UV) run uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
 
 # ----------------------------

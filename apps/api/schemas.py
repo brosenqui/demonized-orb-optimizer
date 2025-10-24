@@ -1,56 +1,67 @@
 # apps/api/schemas.py
 from __future__ import annotations
-
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Optional, Literal
 from pydantic import BaseModel, Field
 
+Rarity = Literal["Common", "Magic", "Rare", "Epic", "Legendary", "Mythic"]
 
-# ---------- Core-shaped inputs (mirror your JSON files) ----------
 class OrbIn(BaseModel):
     type: str
-    set: str = Field(alias="set")
+    set: str
     rarity: str
     value: float
     level: int
 
+class OrbOut(BaseModel):
+    type: str
+    set: str
+    rarity: Rarity
+    value: float
+    level: int
+    slot_index: Optional[int] = None  # allowed but optional
+
+class ProfileRaw(BaseModel):
+    name: str
+    score: Optional[float] = None
+    set_score: Optional[float] = None
+    orb_score: Optional[float] = None
+    assignments: Dict[str, List[OrbOut]] = Field(default_factory=dict)
+
+class RawPayload(BaseModel):
+    combined_score: Optional[float] = None
+    profiles: List[ProfileRaw] = Field(default_factory=list)
+
+class SummaryProfile(BaseModel):
+    name: str
+    score: Optional[float] = None
+    set_score: Optional[float] = None
+    orb_score: Optional[float] = None
+
+class SummaryPayload(BaseModel):
+    combined_score: Optional[float] = None
+    profiles: List[SummaryProfile] = Field(default_factory=list)
 
 class OptimizeProfileIn(BaseModel):
-    # Mirrors one entry from profiles.json, but embeds weight maps (no file paths)
     name: str
-    weight: float = 1.0
-    objective: Literal["sets-first", "types-first"] = "sets-first"
-    power: float = 2.0
-    epsilon: float = 0.02
-
-    # Inline maps (instead of file refs)
+    weight: float
+    objective: Literal["sets-first", "types-first"]
+    power: float
+    epsilon: float
     set_priority: Dict[str, float]
     orb_weights: Dict[str, float]
     orb_level_weights: Dict[str, float]
-
+    categories: Optional[Dict[str, Rarity]] = None
+    slots: Optional[Dict[str, int]] = None  # direct override
 
 class OptimizeRequest(BaseModel):
-    # What used to be orbs.json and slots.json:
     orbs: List[OrbIn]
-    slots: Dict[str, int]  # category -> count
-    # What used to be profiles.json content (embedded):
     profiles: List[OptimizeProfileIn]
     shareable_categories: Optional[List[str]] = None
+    algorithm: Literal["greedy"] = "greedy"  # web app supports greedy only
 
-    # Algorithm & knobs (CLI flags)
-    algorithm: Literal["beam", "greedy"] = "beam"
-    topk: int = 20              # beam helper
-    beam: int = 200             # beam width
-    refine_passes: int = 2
-    refine_report: bool = False
-
-
-# ---------- Response models ----------
 class OptimizeResult(BaseModel):
-    # This is a flexible envelope; we’ll pack a normalized view of your solver output.
-    # You can tighten this later if you have a fixed result dataclass.
-    summary: dict
-    raw: dict  # low-friction full dump (for debugging / UI iteration)
-
+    summary: SummaryPayload
+    raw: RawPayload
 
 class OptimizeResponse(BaseModel):
     ok: bool

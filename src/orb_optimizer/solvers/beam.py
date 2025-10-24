@@ -27,7 +27,7 @@ def orb_key(o: Orb) -> tuple:
     """Stable identity for an orb across processes."""
     return (
         getattr(o, "type", None),
-        getattr(o, "set_name", None),
+        getattr(o, "set", None),
         getattr(o, "value", None),
         getattr(o, "level", None),
     )
@@ -93,7 +93,7 @@ def _score_combo_batch(
 
         # Soft set hint
         set_hint = 0.0
-        for s in {o.set_name for o in combo}:
+        for s in {o.set for o in combo}:
             set_hint += 0.25 * prof["set_priority"].get(s, 0.0)
 
         return (
@@ -225,7 +225,7 @@ class UnifiedOptimizer:
         chosen = [o for group in loadout.values() for o in group]
 
         # Set score
-        counts = Counter(o.set_name for o in chosen)
+        counts = Counter(o.set for o in chosen)
         set_score = 0.0
         for s, c in counts.items():
             th = DEFAULT_SET_COUNTS.get(s)

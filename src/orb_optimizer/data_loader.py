@@ -75,7 +75,7 @@ class DataLoader:
                 out.append(
                     Orb(
                         type=item["type"],
-                        set_name=item["set"],
+                        set=item["set"],
                         rarity=rarity,
                         value=parse_value(item["value"]),
                         level=lvl,

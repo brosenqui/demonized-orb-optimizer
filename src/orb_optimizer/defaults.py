@@ -1,10 +1,10 @@
 # ===== Built-in defaults (for optional knobs) =====
 
 DEFAULT_SET_PRIORITY_WEIGHTS: dict[str, float] = {
-    "Leviathan": 8.0,
-    "Beezlebub": 6.0,
-    "Belphegor": 5.0,
-    "Asmodeus": 1.5,
+    "Leviathan": 1.0,
+    "Beezlebub": 1.0,
+    "Belphegor": 1.0,
+    "Asmodeus": 1.0,
     "Mammon": 1.1,
     "Satan": 1.0,
     "Lucifer": 1.0,
@@ -27,7 +27,7 @@ DEFAULT_LEVEL_CAPS: dict[str, int] = {
     "Common": 3,
     "Magic": 3,
     "Rare": 6,
-    "Heroic": 6,
+    "Epic": 6,
     "Legendary": 9,
     "Mythic": 9,
 }
@@ -52,5 +52,5 @@ DEFAULT_ORB_LEVEL_WEIGHTS: dict[str, float] = {
     "Sun": 1.0,
     "Grass": 1.0,
     "Lightning": 1.0,
-    "Steel": 5.0,
+    "Steel": 1.0,
 }
