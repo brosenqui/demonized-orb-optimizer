@@ -1,5 +1,5 @@
 import React from "react";
-import OrbTile from "./OrbTile";
+import OrbTile from "../orbs/OrbTile";
 import type { CategoryResult } from "@/lib/resultParser";
 
 export default function CategoryGroup({ cat }: { cat: CategoryResult }) {

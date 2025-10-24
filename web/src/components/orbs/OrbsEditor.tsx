@@ -23,7 +23,7 @@ import {
 import OrbGrid from "./OrbGrid";
 import type { OrbIn } from "../../lib/types";
 import { ORB_TYPES, ORB_SETS } from "../../lib/orbData";
-import { Density, normalizeOrb, clamp } from "./orbDisplay";
+import { Density, normalizeOrb, clamp } from "./OrbDisplay";
 
 // --- Add/Edit form state type ---
 type OrbFormState = {

@@ -12,7 +12,7 @@ import {
   levelPillForDensity,
   setBadgeForDensity,
   tileChromeForDensity,
-} from "./orbDisplay";
+} from "./OrbDisplay";
 
 type OrbTileProps = {
   orb: OrbIn;
