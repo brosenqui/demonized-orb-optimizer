@@ -95,9 +95,15 @@ export default function Home() {
       />
 
       <Section title="Run">
-        <p className="text-sm text-zinc-600 mb-3">
-          This web app runs the <span className="font-semibold">Greedy</span> optimizer.
+        <p className="text-md text-zinc-600 mb-3">
+          This web app runs the <span className="font-semibold">Greedy</span> optimizer.<br />
         </p>
+        <p className="text-sm text-zinc-600 mb-3">
+          The Greedy Solver finds a strong orb setup fast by choosing the best option one step at a time.<br />
+          It looks at each slot, picks the orb that gives the biggest boost right now, then moves to the next.<br />
+          This approach doesn't test every possible combination, but it gets very close to the best result - in a fraction of the time.<br />
+          Use it when you want great results quickly, without waiting for a full exhaustive search.<br />
+          </p>
         <div className="flex flex-wrap gap-2">
           <Button className="btn btn-primary" onClick={handleRun} disabled={loading}>
             {loading ? "Running…" : "Run Optimizer"}
