@@ -26,7 +26,18 @@ export default function ProfileResult({
   profileName: string;
   assignments: Assignments;
 }) {
-  const categories = Object.keys(assignments || {});
+  const CATEGORY_ORDER = ["Soul", "Wings", "Ego", "Wagon", "Beast"];
+
+  const categories = useMemo(() => {
+    const cats = Object.keys(assignments ?? {});
+    return cats.sort((a, b) => {
+      const ia = CATEGORY_ORDER.indexOf(a);
+      const ib = CATEGORY_ORDER.indexOf(b);
+      const ra = ia === -1 ? Number.MAX_SAFE_INTEGER : ia;
+      const rb = ib === -1 ? Number.MAX_SAFE_INTEGER : ib;
+      return ra - rb || a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [assignments]);
 
   // Flatten all assigned orbs for stats
   const allOrbs = useMemo(
@@ -69,8 +80,7 @@ export default function ProfileResult({
               <div key={cat}>
                 <div className="mb-3 text-lg font-semibold">{cat}</div>
                 <div className="p-3 sm:p-4 rounded-2xl bg-white/70 backdrop-blur border border-zinc-200 shadow-sm">
-                  {/* Add slight scale and spacing bump for larger orb appearance */}
-                  <div className="scale-[1.08] transform origin-top-left">
+                  <div className="transform origin-top-left">
                     <OrbGrid
                       orbs={assignments[cat] || []}
                       density="comfortable"
