@@ -6,7 +6,7 @@ import type { OptimizeProfileIn, Rarity } from "../../lib/types";
 import { Button } from "../ui/button";
 import ShareablePicker from "./ShareablePicker";
 import { PRIORITY_TEMPLATES, PROFILE_DEFAULTS } from "../../lib/priorityTemplates";
-import { applyTemplateToProfileDestructive } from "../../lib/applyTemplate";
+import { applyTemplateToProfile } from "../../lib/applyTemplate";
 
 type Props = {
   profiles: OptimizeProfileIn[];
@@ -61,7 +61,7 @@ export default function ProfilesEditor({
     const tpl = PRIORITY_TEMPLATES.find((t) => t.id === tplId);
     if (!tpl) return;
 
-    const next = profiles.map((p) => applyTemplateToProfileDestructive(p, tpl));
+    const next = profiles.map((p) => applyTemplateToProfile(p, tpl));
     setProfiles(next);
   }
 

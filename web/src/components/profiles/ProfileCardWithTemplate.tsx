@@ -3,7 +3,7 @@ import * as React from "react";
 import ProfileCard from "./ProfileCard";
 import { Label } from "../ui/label";
 import PriorityTemplatePicker from "./TemplatePicker";
-import { applyTemplateToProfileDestructive } from "../../lib/applyTemplate";
+import { applyTemplateToProfile } from "../../lib/applyTemplate";
 import type { PriorityTemplate } from "../../lib/priorityTemplates";
 import type { OptimizeProfileIn, Rarity } from "../../lib/types";
 
@@ -34,7 +34,7 @@ export default function ProfileCardWithTemplates(props: Props) {
 
   const handleApply = React.useCallback(() => {
     if (!tpl) return;
-    const next = applyTemplateToProfileDestructive(value, tpl);
+    const next = applyTemplateToProfile(value, tpl);
     onChange(next);
   }, [tpl, value, onChange]);
 
