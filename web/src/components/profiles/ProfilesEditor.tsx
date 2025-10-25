@@ -1,15 +1,20 @@
+// src/components/profiles/ProfilesEditor.tsx
 import React from "react";
 import Section from "../ui/Section";
-import ProfileCard from "./ProfileCard";
+import ProfileCardWithTemplates from "./ProfileCardWithTemplate";
 import type { OptimizeProfileIn, Rarity } from "../../lib/types";
 import { Button } from "../ui/button";
 import ShareablePicker from "./ShareablePicker";
+import { PRIORITY_TEMPLATES, PROFILE_DEFAULTS } from "../../lib/priorityTemplates";
+import { applyTemplateToProfileDestructive } from "../../lib/applyTemplate";
 
 type Props = {
   profiles: OptimizeProfileIn[];
   setProfiles: (p: OptimizeProfileIn[]) => void;
+
   shareable: string[];
   setShareable: (s: string[]) => void;
+
   availableSets: string[];
   availableTypes: string[];
 };
@@ -22,51 +27,45 @@ export default function ProfilesEditor({
   availableSets,
   availableTypes,
 }: Props) {
-  const blank: OptimizeProfileIn = {
-    name: "New Profile",
-    weight: 1,
-    objective: "sets-first",
-    power: 2.0,
-    epsilon: 0.02,
-    set_priority: {},
-    orb_weights: {},
-    orb_level_weights: {},
-    categories: {}, // ensure new profiles start with a categories object
-  };
-
-  function update(i: number, patch: Partial<OptimizeProfileIn>) {
+  function update(index: number, np: OptimizeProfileIn) {
     const next = [...profiles];
-    next[i] = { ...next[i], ...patch } as OptimizeProfileIn;
+    next[index] = np;
     setProfiles(next);
   }
 
-  /**
-   * When a profile sets a category rarity, if that category is shareable,
-   * propagate the same rarity to ALL profiles.
-   */
-  function handleSetCategory(pIndex: number, cat: string, rarity: Rarity | "") {
-    // Update the target profile first
-    const next = profiles.map((p, idx) => {
-      if (idx !== pIndex) return p;
-      const cats = { ...(p.categories ?? {}) };
-      if (!rarity) delete cats[cat];
-      else cats[cat] = rarity;
-      return { ...p, categories: cats };
-    });
+  function handleSetCategory(index: number, cat: string, rarity: Rarity) {
+    const p = profiles[index];
+    const updated: OptimizeProfileIn = {
+      ...p,
+      categories: { ...(p.categories || {}), [cat]: rarity },
+    };
 
-    // If cat is shareable, propagate to every other profile
+    let next = [...profiles];
+    next[index] = updated;
+
     if (shareable.includes(cat)) {
-      for (let i = 0; i < next.length; i++) {
-        if (i === pIndex) continue;
-        const cats = { ...(next[i].categories ?? {}) };
-        if (!rarity) delete cats[cat];
-        else cats[cat] = rarity;
-        next[i] = { ...next[i], categories: cats };
-      }
+      next = next.map((prof, i) =>
+        i === index
+          ? updated
+          : { ...prof, categories: { ...(prof.categories || {}), [cat]: rarity } }
+      );
     }
 
     setProfiles(next);
   }
+
+  // Bulk-apply template (destructive)
+  const [tplId, setTplId] = React.useState<string>("");
+
+  function applyTemplateToAll() {
+    const tpl = PRIORITY_TEMPLATES.find((t) => t.id === tplId);
+    if (!tpl) return;
+
+    const next = profiles.map((p) => applyTemplateToProfileDestructive(p, tpl));
+    setProfiles(next);
+  }
+
+  const blank: OptimizeProfileIn = { ...PROFILE_DEFAULTS };
 
   return (
     <Section
@@ -87,14 +86,13 @@ export default function ProfilesEditor({
         )}
 
         {profiles.map((p, i) => (
-          <ProfileCard
+          <ProfileCardWithTemplates
             key={i}
             value={p}
             onChange={(np) => update(i, np)}
-            onRemove={() =>
-              setProfiles(profiles.filter((_, j) => j !== i))
-            }
+            onRemove={() => setProfiles(profiles.filter((_, j) => j !== i))}
             onSetCategory={(cat, rarity) => handleSetCategory(i, cat, rarity)}
+            templates={PRIORITY_TEMPLATES}
             availableSets={availableSets}
             availableTypes={availableTypes}
           />
