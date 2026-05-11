@@ -19,21 +19,15 @@ import {
   SelectContent,
   SelectItem,
 } from "../ui/select";
+import { ChevronDown, ChevronUp, Filter, RotateCcw } from "lucide-react";
 
 import OrbGrid from "./OrbGrid";
-import type { OrbIn } from "../../lib/types";
+import OrbsFilterBar from "./OrbsFilterBar";
+import OrbFormDialog, { type OrbFormState } from "./OrbFormDialog";
+import { useOrbFilters } from "./useOrbFilters";
+import { rarityOptions, type OrbIn } from "../../lib/types";
 import { ORB_TYPES, ORB_SETS } from "../../lib/orbData";
 import { Density, normalizeOrb, clamp } from "./OrbDisplay";
-import { HelpTooltip } from "../ui/helpToolTip";
-
-// --- Add/Edit form state type ---
-type OrbFormState = {
-  type: OrbIn["type"];
-  set: OrbIn["set"];
-  rarity: OrbIn["rarity"];
-  value: number;
-  level: number;
-};
 
 export default function OrbsEditor({
   orbs,
@@ -61,6 +55,28 @@ export default function OrbsEditor({
     value: 0,
     level: 0,
   }));
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const {
+    selectedTypes,
+    setSelectedTypes,
+    selectedSets,
+    setSelectedSets,
+    selectedRarities,
+    setSelectedRarities,
+    levelMin,
+    setLevelMin,
+    levelMax,
+    setLevelMax,
+    searchQuery,
+    setSearchQuery,
+    visibleOrbIndices,
+    visibleOrbs,
+    hasActiveFilters,
+    activeFilterGroups,
+    resetFilters,
+  } = useOrbFilters(orbs);
+  const visibleCount = visibleOrbs.length;
+  const totalCount = orbs.length;
 
   // ---- Import handlers ----
   async function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -95,6 +111,7 @@ export default function OrbsEditor({
       setOrbs(normalized); // replace list
       setOpenImport(false);
       setJsonText("");
+      // keep current filters; they still apply to the new list
     } catch (e: any) {
       setImportError(e?.message || "Invalid JSON");
     }
@@ -144,14 +161,10 @@ export default function OrbsEditor({
     setOpenForm(false);
   }
 
-  function removeOrb(index: number) {
-    setOrbs(orbs.filter((_, i) => i !== index));
-  }
-
   return (
     <Section
       title="Orbs"
-      helpText="Enter and manage your collection of orbs here. You can add orbs manually, import JSON, and adjust the display density of the orb grid."
+      helpText="Enter and manage your collection of orbs here. You can add orbs manually, import JSON, adjust display density, and filter/sort with search, type, set, rarity, and level."
       actions={
         <div className="flex gap-2 items-center">
           {/* Density selector */}
@@ -225,116 +238,117 @@ export default function OrbsEditor({
         </div>
       }
     >
+      {/* Filters */}
+      <div className="mb-4 rounded-md border border-border p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium inline-flex items-center gap-2">
+            <Filter className="h-4 w-4" aria-hidden="true" />
+            Filters
+          </p>
+          <div className="flex items-center gap-2">
+            {totalCount > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {visibleCount}/{totalCount} shown
+              </span>
+            )}
+            {hasActiveFilters && (
+              <span className="text-xs text-muted-foreground">
+                {activeFilterGroups} active
+              </span>
+            )}
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={resetFilters}>
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                Reset
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setFiltersOpen((open) => !open)}
+              aria-expanded={filtersOpen}
+              title={filtersOpen ? "Collapse filters" : "Expand filters"}
+              className="h-7 w-7 p-0"
+            >
+              {filtersOpen ? (
+                <ChevronUp className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {filtersOpen && (
+          <div className="mt-3">
+            <OrbsFilterBar
+              allTypes={ORB_TYPES}
+              allSets={ORB_SETS}
+              allRarities={rarityOptions}
+              selectedTypes={selectedTypes}
+              setSelectedTypes={setSelectedTypes}
+              selectedSets={selectedSets}
+              setSelectedSets={setSelectedSets}
+              selectedRarities={selectedRarities}
+              setSelectedRarities={setSelectedRarities}
+              levelMin={levelMin}
+              levelMax={levelMax}
+              setLevelMin={setLevelMin}
+              setLevelMax={setLevelMax}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Grid + empty states */}
       {orbs.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No orbs yet. Import JSON or click “Add Orb”.
         </p>
+      ) : visibleOrbs.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          No orbs match your filters.
+          {hasActiveFilters && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="underline underline-offset-4"
+                onClick={resetFilters}
+              >
+                Reset filters
+              </button>
+              .
+            </>
+          )}
+        </div>
       ) : (
         <OrbGrid
-          orbs={orbs}
+          orbs={visibleOrbs}
           density={density}
-          onTileClick={openEdit}
-          onTileDelete={removeOrb}
+          onTileClick={(i) => {
+            const originalIndex = visibleOrbIndices[i];
+            if (originalIndex !== undefined) openEdit(originalIndex);
+          }}
+          onTileDelete={(i) => {
+            const originalIndex = visibleOrbIndices[i];
+            if (originalIndex !== undefined) {
+              setOrbs(orbs.filter((_, idx) => idx !== originalIndex));
+            }
+          }}
         />
       )}
 
-      {/* Add/Edit Orb Dialog */}
-      <Dialog open={openForm} onOpenChange={setOpenForm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingIndex === null ? "Add Orb" : "Edit Orb"}</DialogTitle>
-          </DialogHeader>
-
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-sm">Type</label>
-              <UiSelect
-                value={form.type}
-                onValueChange={(val) => setForm((f) => ({ ...f, type: val as OrbIn["type"] }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ORB_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </UiSelect>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm">Set</label>
-              <UiSelect
-                value={form.set}
-                onValueChange={(val) => setForm((f) => ({ ...f, set: val as OrbIn["set"] }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Set" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ORB_SETS.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </UiSelect>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm">Rarity</label>
-              <UiSelect
-                value={form.rarity}
-                onValueChange={(val) => setForm((f) => ({ ...f, rarity: val as OrbIn["rarity"] }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Rarity" />
-                </SelectTrigger>
-                <SelectContent>
-                  {["Common","Magic","Rare","Epic","Legendary","Mythic"].map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {r}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </UiSelect>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm">Value</label>
-              <Input
-                type="number"
-                value={form.value}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, value: clamp(Number(e.target.value) || 0) }))
-                }
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm">Level</label>
-              <Input
-                type="number"
-                value={form.level}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  setForm((f) => ({ ...f, level: clamp(Number.isFinite(n) ? n : 0, 0, 9) }));
-                }}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setOpenForm(false)}>
-              Cancel
-            </Button>
-            <Button onClick={saveForm}>{editingIndex === null ? "Add" : "Save"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <OrbFormDialog
+        open={openForm}
+        onOpenChange={setOpenForm}
+        isEditing={editingIndex !== null}
+        form={form}
+        setForm={setForm}
+        onSave={saveForm}
+      />
     </Section>
   );
 }

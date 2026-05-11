@@ -56,7 +56,11 @@ export default function OrbTile({
       onKeyDown={
         clickable
           ? (e) => {
-              if (e.key === "Enter" || e.key === " ") onClick?.();
+              if (e.key === "Enter") onClick?.();
+              if (e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
             }
           : undefined
       }
