@@ -191,6 +191,26 @@ make test
 
 ---
 
+## 🌐 Web UI Commands
+
+The React/Vite app lives in `web/`.
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Validation and CI-friendly checks:
+
+```bash
+npm run typecheck
+npm run test
+npm run build
+```
+
+---
+
 ## 🧾 License
 
 MIT License © 2025  

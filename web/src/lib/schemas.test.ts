@@ -1,0 +1,83 @@
+import { describe, expect, it } from "vitest";
+import { parseOptimizeRequest, parseOptimizeResponse } from "@/lib/schemas";
+
+describe("schemas", () => {
+  it("parses and normalizes optimize request", () => {
+    const request = parseOptimizeRequest({
+      algorithm: "greedy",
+      shareable_categories: ["Soul"],
+      orbs: [
+        {
+          type: "Flame",
+          set: "Lucifer",
+          rarity: "Rare",
+          value: "12.5",
+          level: "3",
+          awakened: "2",
+        },
+      ],
+      profiles: [
+        {
+          name: "Main",
+          weight: 1,
+          objective: "sets-first",
+          power: 2,
+          epsilon: 0.02,
+          set_priority: {},
+          orb_weights: {},
+          orb_level_weights: {},
+          categories: { Soul: "Rare" },
+        },
+      ],
+    });
+
+    expect(request.orbs[0].value).toBe(12.5);
+    expect(request.orbs[0].level).toBe(3);
+    expect(request.orbs[0].awakened).toBe(2);
+  });
+
+  it("parses canonical optimize response", () => {
+    const response = parseOptimizeResponse({
+      ok: true,
+      result: {
+        summary: {
+          combined_score: 12,
+          per_profile: [
+            { name: "Main", score: 12, set_score: 8, orb_score: 4 },
+          ],
+        },
+        raw: {
+          combined_score: 12,
+          profiles: [
+            {
+              name: "Main",
+              score: 12,
+              set_score: 8,
+              orb_score: 4,
+              used_slots: { Soul: 1 },
+              assignments: {
+                Soul: [
+                  {
+                    type: "Flame",
+                    set: "Lucifer",
+                    rarity: "Rare",
+                    value: 12,
+                    level: 2,
+                    awakened: 1,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.result.raw.profiles[0].assignments.Soul).toHaveLength(1);
+  });
+
+  it("fails invalid response shapes", () => {
+    expect(() => parseOptimizeResponse({ ok: true })).toThrow();
+  });
+});
