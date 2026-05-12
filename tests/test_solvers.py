@@ -85,6 +85,8 @@ def test_greedy_enforces_set_cap_and_returns_partial() -> None:
     assert profile.filled_slots == 5
     assert profile.is_partial is True
     assert result.is_partial is True
+    assert result.run_diagnostics.get("algorithm") == "greedy"
+    assert result.run_diagnostics.get("set_cap_rejections", 0) >= 1
 
 
 def test_greedy_shared_slots_respect_per_profile_set_cap() -> None:
@@ -168,6 +170,8 @@ def test_beam_enforces_set_cap_and_returns_partial() -> None:
     assert profile.filled_slots <= 5
     assert profile.is_partial is True
     assert result.is_partial is True
+    assert result.run_diagnostics.get("algorithm") == "beam"
+    assert result.run_diagnostics.get("set_cap_rejections", 0) >= 1
 
 
 def test_beam_populates_shared_summary() -> None:

@@ -58,6 +58,11 @@ describe("schemas", () => {
             cap_limited_slots_by_profile: { Main: 1 },
             slots: [],
           },
+          run_diagnostics: {
+            algorithm: "greedy",
+            duration_ms: 123,
+            candidate_evaluations: 88,
+          },
           profiles: [
             {
               name: "Main",
@@ -87,6 +92,11 @@ describe("schemas", () => {
             compromise_loss_by_profile: { Main: 0.5 },
             cap_limited_slots_by_profile: { Main: 1 },
             slots: [],
+          },
+          run_diagnostics: {
+            algorithm: "greedy",
+            duration_ms: 123,
+            candidate_evaluations: 88,
           },
           profiles: [
             {
@@ -118,6 +128,7 @@ describe("schemas", () => {
     expect(response.ok).toBe(true);
     expect(response.result.raw.profiles[0].assignments.Soul).toHaveLength(1);
     expect(response.result.raw.shared_summary?.compromise_loss_total).toBe(0.5);
+    expect(response.result.raw.run_diagnostics?.algorithm).toBe("greedy");
   });
 
   it("fails invalid response shapes", () => {

@@ -353,6 +353,14 @@ class UnifiedOptimizer:
     def optimize(self, beam_width: int = 200) -> MultiProfileResult:
         """Run the joint BEAM search optimization."""
         self.logger.info("⚙️ Starting optimization in BEAM mode...")
+        self._diag_time_budget_hit = False
+        self._diag_candidate_evaluations = 0
+        self._diag_set_cap_rejections = 0
+        self._diag_categories_processed = 0
+        self._diag_no_feasible_categories = 0
+        self._diag_expansion_attempts = 0
+        self._diag_expansion_valid = 0
+        self._diag_parallel_modes: set[str] = set()
         return self._beam_search(beam_width)
 
     def _copy_assign_with(
@@ -395,6 +403,7 @@ class UnifiedOptimizer:
         for cat_idx, cat in enumerate(cats):
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             if elapsed_ms >= float(self.max_time_ms):
+                self._diag_time_budget_hit = True
                 self.logger.warning(
                     f"⏱️ Beam time budget reached at {elapsed_ms:.0f}ms; returning best partial assignment."
                 )
@@ -444,10 +453,12 @@ class UnifiedOptimizer:
                                 batch_idx = future_to_batch[fut]
                                 scored.extend(fut.result())
                                 completed += len(batches[batch_idx])
+                                self._diag_candidate_evaluations += len(batches[batch_idx])
                                 self.logger.info(
                                     f"   • [{label}] Evaluated {completed}/{total_combos} combinations "
                                     f"({(completed/total_combos*100 if total_combos else 100):.1f}%)"
                                 )
+                        self._diag_parallel_modes.add(label)
                         return True
                     except Exception as exc:
                         self.logger.warning(f"⚠️ {label} executor failed ({exc}); falling back.")
@@ -457,16 +468,19 @@ class UnifiedOptimizer:
                     completed = 0
                     for batch in batches:
                         if ((time.perf_counter() - started) * 1000.0) >= float(self.max_time_ms):
+                            self._diag_time_budget_hit = True
                             self.logger.warning(
                                 "⏱️ Beam time budget reached during scoring; using partial scored batch set."
                             )
                             break
                         scored.extend(_score_combo_batch(batch, ctx))
                         completed += len(batch)
+                        self._diag_candidate_evaluations += len(batch)
                         self.logger.info(
                             f"   • [serial] Evaluated {completed}/{total_combos} combinations "
                             f"({(completed/total_combos*100 if total_combos else 100):.1f}%)"
                         )
+                    self._diag_parallel_modes.add("serial")
 
                 if num_procs <= 1 or self.parallelism == "serial":
                     _run_serial()
@@ -517,6 +531,7 @@ class UnifiedOptimizer:
                 next_states = self._expand_with_lists(partials, full_lists, cat)
                 if not next_states:
                     total_full = len(self._valid_combos_by_cat[cat.name])
+                    self._diag_no_feasible_categories += 1
                     self.logger.warning(
                         "⚠️ No feasible states after full retry; returning best partial assignment so far. "
                         f"Category={cat.name}, combos={total_full}, shareable={cat.name in self.shareable}."
@@ -535,6 +550,7 @@ class UnifiedOptimizer:
                 f"{(partials[-1]['key'][0] if partials else 'N/A')} - "
                 f"{(partials[0]['key'][0] if partials else 'N/A')}"
             )
+            self._diag_categories_processed += 1
 
         # Finish (if no states survive, return best partial start state)
         best_state = max(partials, key=lambda s: s["key"])
@@ -559,6 +575,8 @@ class UnifiedOptimizer:
                 is_partial=filled_slots < requested_slots,
             )
 
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+
         return MultiProfileResult(
             profiles=per_profile,
             combined_score=primary,
@@ -578,6 +596,23 @@ class UnifiedOptimizer:
                 ),
                 set_cap_fn=self._set_cap,
             ),
+            run_diagnostics={
+                "algorithm": "beam",
+                "duration_ms": elapsed_ms,
+                "time_budget_ms": self.max_time_ms,
+                "time_budget_hit": bool(self._diag_time_budget_hit),
+                "beam_width": int(beam_width),
+                "topk_per_category": int(self.topk),
+                "parallelism_config": self.parallelism,
+                "parallelism_used": sorted(self._diag_parallel_modes),
+                "categories_total": len(cats),
+                "categories_processed": int(self._diag_categories_processed),
+                "candidate_evaluations": int(self._diag_candidate_evaluations),
+                "set_cap_rejections": int(self._diag_set_cap_rejections),
+                "expansion_attempts": int(self._diag_expansion_attempts),
+                "valid_expansions": int(self._diag_expansion_valid),
+                "no_feasible_categories": int(self._diag_no_feasible_categories),
+            },
         )
 
     # --------------------------- expansion helper ---------------------------
@@ -628,6 +663,7 @@ class UnifiedOptimizer:
                         continue
                     new_assign = self._copy_assign_with(state["assign"], cat.name, [c] * len(self.P.profiles))
                     if not self._within_set_caps(new_assign):
+                        self._diag_set_cap_rejections += 1
                         continue
                     new_used = used_ids | ids
                     key = self._key(new_assign)
@@ -684,10 +720,14 @@ class UnifiedOptimizer:
 
                 new_assign = self._copy_assign_with(state["assign"], cat.name, list(choices))
                 if not self._within_set_caps(new_assign):
+                    self._diag_set_cap_rejections += 1
                     continue
                 key = self._key(new_assign)
                 out.append({"assign": new_assign, "used_ids": new_used, "key": key})
                 divergent_valid += 1
+
+        self._diag_expansion_attempts += shared_attempts + divergent_attempts
+        self._diag_expansion_valid += shared_valid + divergent_valid
 
         # Logs
         if cat.name in self.shareable:

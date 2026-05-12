@@ -102,6 +102,7 @@ export type OptimizeRawPayload = {
   filled_slots: number;
   is_partial: boolean;
   shared_summary: SharedSummary | null;
+  run_diagnostics: Record<string, unknown> | null;
   profiles: OptimizeRawProfile[];
 };
 
@@ -121,6 +122,7 @@ export type OptimizeSummary = {
   filled_slots: number;
   is_partial: boolean;
   shared_summary: SharedSummary | null;
+  run_diagnostics: Record<string, unknown> | null;
   profiles: OptimizeSummaryProfile[];
 };
 

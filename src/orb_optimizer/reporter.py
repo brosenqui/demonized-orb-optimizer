@@ -43,6 +43,7 @@ class ReportOptions:
     show_active_sets: bool = True
     show_orb_type_summary: bool = True
     show_shared_summary: bool = True
+    show_run_diagnostics: bool = True
     # Limit the amount of output for large datasets
     max_sets_to_show: int = 999999
     max_categories_to_show: int = 999999
@@ -86,6 +87,8 @@ class OptimizationReporter:
 
         if opts.show_shared_summary and getattr(result, "shared_summary", None):
             self._emit_shared_summary(result.shared_summary)
+        if opts.show_run_diagnostics and getattr(result, "run_diagnostics", None):
+            self._emit_run_diagnostics(result.run_diagnostics)
 
         # Per-profile sections
         for p in profiles:
@@ -159,6 +162,41 @@ class OptimizationReporter:
         else:
             for orb_type, total in totals_by_type.items():
                 self._println(f"  • {orb_type}: {float(total):.4f}")
+        self._println("")
+
+    def _emit_run_diagnostics(self, diagnostics: Dict[str, Any]) -> None:
+        if not diagnostics:
+            return
+        self._print_header("Run Diagnostics", color="yellow", bold=True)
+        order = [
+            "algorithm",
+            "duration_ms",
+            "time_budget_ms",
+            "time_budget_hit",
+            "starts_planned",
+            "starts_executed",
+            "beam_width",
+            "topk_per_type",
+            "topk_per_category",
+            "parallelism_config",
+            "parallelism_used",
+            "categories_total",
+            "categories_processed",
+            "candidate_evaluations",
+            "set_cap_rejections",
+            "no_viable_slots",
+            "expansion_attempts",
+            "valid_expansions",
+            "no_feasible_categories",
+        ]
+        printed: set[str] = set()
+        for key in order:
+            if key not in diagnostics:
+                continue
+            printed.add(key)
+            self._print_kv(f"• {key}", str(diagnostics[key]))
+        for key in sorted(k for k in diagnostics.keys() if k not in printed):
+            self._print_kv(f"• {key}", str(diagnostics[key]))
         self._println("")
 
     # ---- sections ----

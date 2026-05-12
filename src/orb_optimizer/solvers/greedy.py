@@ -194,26 +194,63 @@ class GreedyOptimizer:
         deterministic_orders = self._deterministic_profile_orders()
         rng = random.Random(self.seed if self.seed is not None else 0)
 
+        self._diag_candidate_evaluations = 0
+        self._diag_set_cap_rejections = 0
+        self._diag_no_viable_slots = 0
+        self._diag_shareable_slots_attempted = 0
+        self._diag_shareable_slots_filled = 0
+        self._diag_nonshareable_slots_attempted = 0
+        self._diag_nonshareable_slots_filled = 0
+
         best: MultiProfileResult | None = None
         runs = 0
+        start_scores: List[float] = []
+        time_budget_hit = False
 
         for order in deterministic_orders:
             result = self._solve_once(order)
             best = self._pick_better(best, result)
             runs += 1
+            start_scores.append(result.combined_score)
             if self._time_budget_exceeded(started):
+                time_budget_hit = True
                 break
 
         for _ in range(self.restarts):
             if self._time_budget_exceeded(started):
+                time_budget_hit = True
                 break
             shuffled = list(self.profiles)
             rng.shuffle(shuffled)
             result = self._solve_once(shuffled)
             best = self._pick_better(best, result)
             runs += 1
+            start_scores.append(result.combined_score)
+
+        if best is None:
+            raise RuntimeError("Greedy optimizer produced no result")
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
+        best.run_diagnostics = {
+            "algorithm": "greedy",
+            "duration_ms": elapsed_ms,
+            "time_budget_ms": self.max_time_ms,
+            "time_budget_hit": time_budget_hit,
+            "starts_planned": len(deterministic_orders) + self.restarts,
+            "starts_executed": runs,
+            "candidate_evaluations": int(self._diag_candidate_evaluations),
+            "set_cap_rejections": int(self._diag_set_cap_rejections),
+            "no_viable_slots": int(self._diag_no_viable_slots),
+            "shareable_slots_attempted": int(self._diag_shareable_slots_attempted),
+            "shareable_slots_filled": int(self._diag_shareable_slots_filled),
+            "nonshareable_slots_attempted": int(self._diag_nonshareable_slots_attempted),
+            "nonshareable_slots_filled": int(self._diag_nonshareable_slots_filled),
+            "topk_per_type": self.topk,
+            "restarts_configured": self.restarts,
+            "seed": self.seed if self.seed is not None else 0,
+            "best_start_score": max(start_scores) if start_scores else None,
+            "worst_start_score": min(start_scores) if start_scores else None,
+        }
         self.logger.info(
             f"✅ Greedy completed in {elapsed_ms}ms across {runs} start(s). "
             f"Best score={best.combined_score:.6f} "
@@ -245,6 +282,7 @@ class GreedyOptimizer:
                 eligible_profiles = [p for p in self.profiles if slot_index < self._slots[p.name].get(cat, 0)]
                 if not eligible_profiles:
                     break
+                self._diag_shareable_slots_attempted += 1
 
                 best_orb: Optional[Orb] = None
                 best_score = -float("inf")
@@ -265,7 +303,9 @@ class GreedyOptimizer:
                         if any(orb.type in existing_types_per_prof[p.name] for p in eligible_profiles):
                             continue
                         if not self._can_assign_to_profiles(orb, eligible_profiles, set_counts):
+                            self._diag_set_cap_rejections += 1
                             continue
+                        self._diag_candidate_evaluations += 1
 
                         combined = 0.0
                         per_prof_details: Dict[str, Dict[str, float]] = {}
@@ -292,6 +332,7 @@ class GreedyOptimizer:
                             )
 
                 if best_orb is None:
+                    self._diag_no_viable_slots += 1
                     continue
 
                 for p in eligible_profiles:
@@ -309,6 +350,7 @@ class GreedyOptimizer:
                     existing_types_per_prof[p.name].add(assigned.type)
 
                 used_ids_global.add(strong_orb_key(best_orb))
+                self._diag_shareable_slots_filled += 1
 
                 if self.enable_debug_breakdown and candidate_debug:
                     self._log_candidate_debug(cat, slot_index, candidate_debug, chosen=best_orb)
@@ -324,6 +366,7 @@ class GreedyOptimizer:
                 types_in_cat = {ao.type for ao in assign[prof.name][cat]}
 
                 for slot_index in range(len(assign[prof.name][cat]), slots_needed):
+                    self._diag_nonshareable_slots_attempted += 1
                     best_orb: Optional[Orb] = None
                     best_score = -float("inf")
                     candidate_debug: List[Dict[str, Any]] = []
@@ -340,7 +383,9 @@ class GreedyOptimizer:
                             if orb.type in types_in_cat:
                                 continue
                             if not self._can_assign_set(prof, orb, set_counts[prof.name]):
+                                self._diag_set_cap_rejections += 1
                                 continue
+                            self._diag_candidate_evaluations += 1
 
                             d_set, d_orb = self._marginal_gain(prof, orb, set_counts[prof.name])
                             score = coeffs.set_primary * d_set + coeffs.orb_primary * d_orb
@@ -365,6 +410,7 @@ class GreedyOptimizer:
                         self.logger.debug(
                             f"ℹ️ No viable orb for {prof.name}:{cat} slot {slot_index + 1}/{slots_needed}"
                         )
+                        self._diag_no_viable_slots += 1
                         break
 
                     assigned = AssignedOrb(
@@ -380,6 +426,7 @@ class GreedyOptimizer:
                     set_counts[prof.name][assigned.set] += 1
                     used_ids_global.add(strong_orb_key(best_orb))
                     types_in_cat.add(assigned.type)
+                    self._diag_nonshareable_slots_filled += 1
 
                     if self.enable_debug_breakdown and candidate_debug:
                         self._log_candidate_debug(cat, slot_index, candidate_debug, chosen=best_orb, profile=prof.name)

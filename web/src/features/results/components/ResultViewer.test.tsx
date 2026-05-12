@@ -24,6 +24,11 @@ const SUCCESS_RESPONSE: OptimizeResponse = {
         cap_limited_slots_by_profile: {},
         slots: [],
       },
+      run_diagnostics: {
+        algorithm: "greedy",
+        duration_ms: 12,
+        candidate_evaluations: 4,
+      },
       profiles: [
         {
           name: "Main",
@@ -53,6 +58,11 @@ const SUCCESS_RESPONSE: OptimizeResponse = {
         compromise_loss_by_profile: { Main: 0 },
         cap_limited_slots_by_profile: {},
         slots: [],
+      },
+      run_diagnostics: {
+        algorithm: "greedy",
+        duration_ms: 12,
+        candidate_evaluations: 4,
       },
       profiles: [
         {

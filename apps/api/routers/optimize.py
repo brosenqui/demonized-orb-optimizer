@@ -73,6 +73,7 @@ def _summarize_result_multi(
     filled_slots: int,
     is_partial: bool,
     shared_summary: Dict[str, Any] | None,
+    run_diagnostics: Dict[str, Any] | None,
 ) -> Dict[str, Any]:
     """Compact UI summary derived from already-normalized profiles."""
     return {
@@ -81,6 +82,7 @@ def _summarize_result_multi(
         "filled_slots": filled_slots,
         "is_partial": is_partial,
         "shared_summary": shared_summary,
+        "run_diagnostics": run_diagnostics,
         "profiles": [
             {
                 "name": p["name"],
@@ -198,6 +200,7 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     filled_slots = int(getattr(result, "filled_slots", 0) or 0)
     is_partial = bool(getattr(result, "is_partial", False))
     shared_summary = shared_summary_to_dict(getattr(result, "shared_summary", None))
+    run_diagnostics = getattr(result, "run_diagnostics", None) or None
 
     normalized_profiles: List[Dict[str, Any]] = []
     # result.profiles expected as dict[name] -> data
@@ -254,6 +257,7 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
         filled_slots=filled_slots,
         is_partial=is_partial,
         shared_summary=shared_summary,
+        run_diagnostics=run_diagnostics,
     )
     logger.info("Optimization complete")
 
@@ -268,6 +272,7 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
                 "filled_slots": filled_slots,
                 "is_partial": is_partial,
                 "shared_summary": shared_summary,
+                "run_diagnostics": run_diagnostics,
                 "profiles": normalized_profiles,  # <-- ARRAY, not dict
             },
         ),

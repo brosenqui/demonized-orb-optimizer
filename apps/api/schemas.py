@@ -1,6 +1,6 @@
 # apps/api/schemas.py
 from __future__ import annotations
-from typing import Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 from pydantic import BaseModel, Field
 
 Rarity = Literal["Common", "Magic", "Rare", "Epic", "Legendary", "Mythic"]
@@ -71,6 +71,7 @@ class RawPayload(BaseModel):
     filled_slots: int = 0
     is_partial: bool = False
     shared_summary: Optional[SharedSummaryOut] = None
+    run_diagnostics: Optional[Dict[str, Any]] = None
     profiles: List[ProfileRaw] = Field(default_factory=list)
 
 class SummaryProfile(BaseModel):
@@ -88,6 +89,7 @@ class SummaryPayload(BaseModel):
     filled_slots: int = 0
     is_partial: bool = False
     shared_summary: Optional[SharedSummaryOut] = None
+    run_diagnostics: Optional[Dict[str, Any]] = None
     profiles: List[SummaryProfile] = Field(default_factory=list)
 
 class OptimizeProfileIn(BaseModel):

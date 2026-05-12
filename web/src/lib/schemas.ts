@@ -151,6 +151,7 @@ export const optimizeRawPayloadSchema = z
     filled_slots: z.coerce.number().int().optional(),
     is_partial: z.boolean().optional(),
     shared_summary: sharedSummarySchema.nullable().optional(),
+    run_diagnostics: z.record(z.string(), z.unknown()).nullable().optional(),
     profiles: z.array(optimizeRawProfileSchema).default([]),
   })
   .transform((payload) => ({
@@ -160,6 +161,7 @@ export const optimizeRawPayloadSchema = z
     filled_slots: payload.filled_slots ?? 0,
     is_partial: payload.is_partial ?? false,
     shared_summary: payload.shared_summary ?? null,
+    run_diagnostics: payload.run_diagnostics ?? null,
   }));
 
 export const optimizeSummarySchema = z
@@ -169,6 +171,7 @@ export const optimizeSummarySchema = z
     filled_slots: z.coerce.number().int().optional(),
     is_partial: z.boolean().optional(),
     shared_summary: sharedSummarySchema.nullable().optional(),
+    run_diagnostics: z.record(z.string(), z.unknown()).nullable().optional(),
     profiles: z
       .array(
         z.object({
@@ -189,6 +192,7 @@ export const optimizeSummarySchema = z
     filled_slots: summary.filled_slots ?? 0,
     is_partial: summary.is_partial ?? false,
     shared_summary: summary.shared_summary ?? null,
+    run_diagnostics: summary.run_diagnostics ?? null,
     profiles: summary.profiles.map((profile) => ({
       ...profile,
       score: profile.score ?? null,

@@ -210,3 +210,4 @@ class MultiProfileResult:
     filled_slots: int = 0
     is_partial: bool = False
     shared_summary: Optional[SharedSummary] = None
+    run_diagnostics: Dict[str, Any] = field(default_factory=dict)

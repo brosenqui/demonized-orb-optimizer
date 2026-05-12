@@ -17,6 +17,7 @@ export type ParsedResult = {
   filled_slots: number;
   is_partial: boolean;
   shared_summary: SharedSummary | null;
+  run_diagnostics: Record<string, unknown> | null;
   profiles: ParsedProfile[];
 };
 
@@ -29,6 +30,7 @@ export function parseResultsFromRaw(raw: OptimizeRawPayload | null | undefined):
     filled_slots: raw.filled_slots ?? 0,
     is_partial: raw.is_partial ?? false,
     shared_summary: raw.shared_summary ?? null,
+    run_diagnostics: raw.run_diagnostics ?? null,
     profiles: raw.profiles.map((profile) => ({
       name: profile.name,
       score: profile.score ?? null,
