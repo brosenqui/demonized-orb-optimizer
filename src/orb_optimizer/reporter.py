@@ -73,6 +73,12 @@ class OptimizationReporter:
 
         self._print_header("✅ Optimization Complete!", color="green", bold=True)
         self._print_kv("🏆 Combined Score (primary)", f"{result.combined_score:.2f}", strong=True)
+        self._print_kv(
+            "📦 Coverage",
+            f"{result.filled_slots}/{result.requested_slots} "
+            f"({'partial' if result.is_partial else 'complete'})",
+        )
+        self._println("")
 
         if opts.show_refine and opts.base_result is not None:
             self._emit_refine_summary(opts.base_result, result, passes=opts.refine_passes)
@@ -87,6 +93,11 @@ class OptimizationReporter:
             self._print_header(f"[{p.name}] Loadout", color="blue", bold=True)
             self._print_kv("• Set score", f"{set_s:.2f}")
             self._print_kv("• Orb score", f"{orb_s:.2f}")
+            self._print_kv(
+                "• Coverage",
+                f"{pdata.filled_slots}/{pdata.requested_slots} "
+                f"({'partial' if pdata.is_partial else 'complete'})",
+            )
             self._println("")
 
             # Loadout details by category
@@ -107,9 +118,10 @@ class OptimizationReporter:
                 self._emit_orb_type_summary(loadout)
 
     # ---- sections ----
-    def _emit_refine_summary(self, base: Dict[str, Any], refined: Dict[str, Any], *, passes: int) -> None:
-        before = float(base.get("combined_score", 0.0))
-        after = float(refined.get("combined_score", 0.0))
+    def _emit_refine_summary(self, base: Any, refined: MultiProfileResult, *, passes: int) -> None:
+        before_raw = base.get("combined_score", 0.0) if isinstance(base, dict) else getattr(base, "combined_score", 0.0)
+        before = float(before_raw)
+        after = float(getattr(refined, "combined_score", 0.0))
         delta = after - before
         self._print_header("🧽 Refine", color="yellow")
         self._print_kv("• Passes", str(passes))

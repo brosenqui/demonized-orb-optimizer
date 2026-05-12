@@ -162,8 +162,14 @@ class ProfileResult:
     orb_score: float
     # category -> list of assigned orbs
     loadout: Dict[str, List[AssignedOrb]]
+    requested_slots: int = 0
+    filled_slots: int = 0
+    is_partial: bool = False
 
 @dataclass
 class MultiProfileResult:
     profiles: Dict[str, ProfileResult]
     combined_score: float
+    requested_slots: int = 0
+    filled_slots: int = 0
+    is_partial: bool = False
