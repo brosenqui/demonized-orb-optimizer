@@ -142,23 +142,50 @@ def cli(
     }
 
 
-# ---------- Subcommand: beam/heuristic optimizer (current default) ----------
+# ---------- Subcommand: beam optimizer ----------
 @cli.command("beam")
-@click.option("--topk", type=int, default=20, show_default=True,
-              help="Per-profile Top-K combos kept per category (prunes candidate pairs).")
-@click.option("--beam", type=int, default=200, show_default=True, help="Beam width.")
-@click.option("--refine-passes", type=int, default=2, show_default=True,
-              help="Number of greedy local-improvement passes after search (0 to disable).")
-@click.option("--refine-report", is_flag=True,
-              help="Show before/after combined scores if refinement changed result.")
+@click.option(
+    "--topk-per-category",
+    type=int,
+    default=20,
+    show_default=True,
+    help="Top-K combos kept per category.",
+)
+@click.option("--beam-width", type=int, default=200, show_default=True, help="Beam width.")
+@click.option(
+    "--parallelism",
+    type=click.Choice(["auto", "process", "thread", "serial"]),
+    default="auto",
+    show_default=True,
+    help="How beam scoring parallelism is executed.",
+)
+@click.option(
+    "--max-time-ms",
+    type=int,
+    default=5000,
+    show_default=True,
+    help="Beam time budget in milliseconds.",
+)
 @click.pass_obj
-def cmd_optimize(shared: Dict[str, Any], topk: int, beam: int, refine_passes: int, refine_report: bool):
-    """Optimize via beam search + optional refine."""
+def cmd_optimize(
+    shared: Dict[str, Any],
+    topk_per_category: int,
+    beam_width: int,
+    parallelism: str,
+    max_time_ms: int,
+):
+    """Optimize via beam search."""
     logger = shared["logger"]
     inputs: Inputs = shared["inputs"]
 
-    uopt = UnifiedOptimizer(inputs=inputs, logger=logger, topk_per_category=topk)
-    result = uopt.optimize(beam_width=beam)
+    uopt = UnifiedOptimizer(
+        inputs=inputs,
+        logger=logger,
+        topk_per_category=topk_per_category,
+        parallelism=parallelism,
+        max_time_ms=max_time_ms,
+    )
+    result = uopt.optimize(beam_width=beam_width)
 
     OptimizationReporter().emit(
         result=result,
@@ -168,13 +195,54 @@ def cmd_optimize(shared: Dict[str, Any], topk: int, beam: int, refine_passes: in
 
 # ---------- Greedy (unified multi-profile) ----------
 @cli.command("greedy")
+@click.option(
+    "--topk-per-type",
+    type=int,
+    default=16,
+    show_default=True,
+    help="Top-K candidate orbs kept per type.",
+)
+@click.option(
+    "--restarts",
+    type=int,
+    default=6,
+    show_default=True,
+    help="Number of randomized multi-start restarts.",
+)
+@click.option(
+    "--max-time-ms",
+    type=int,
+    default=1500,
+    show_default=True,
+    help="Greedy time budget in milliseconds.",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Random seed used for greedy restarts.",
+)
 @click.pass_obj
-def cmd_greedy(shared: Dict[str, Any]):
-    """Greedy optimizer (single pass across all profiles)."""
+def cmd_greedy(
+    shared: Dict[str, Any],
+    topk_per_type: int,
+    restarts: int,
+    max_time_ms: int,
+    seed: int,
+):
+    """Greedy optimizer with bounded multi-start search."""
     logger = shared["logger"]
     inputs: Inputs = shared["inputs"]
 
-    greedy = GreedyOptimizer(inputs=inputs, logger=logger)
+    greedy = GreedyOptimizer(
+        inputs=inputs,
+        logger=logger,
+        topk_per_type=topk_per_type,
+        restarts=restarts,
+        max_time_ms=max_time_ms,
+        seed=seed,
+    )
     result = greedy.optimize()
 
     OptimizationReporter().emit(

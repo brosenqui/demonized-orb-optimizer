@@ -6,14 +6,22 @@ from __future__ import annotations
 import bisect
 import math
 import concurrent.futures
-from concurrent.futures import ProcessPoolExecutor
+import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from collections import Counter, defaultdict
 from dataclasses import asdict
 from itertools import combinations, product
 from typing import Any, Dict, List, Tuple, Optional
 
-from ..models import Orb, Category, ProfileConfig
+from ..models import Orb, Category, ProfileConfig, ProfileResult, MultiProfileResult
 from ..defaults import DEFAULT_SET_COUNTS
+
+SET_MAX_COUNTS: dict[str, int] = {
+    set_name: max(thresholds)
+    for set_name, thresholds in DEFAULT_SET_COUNTS.items()
+    if thresholds
+}
+FLEX_SAMPLE_LIMIT = 250
 
 # ----------------------------- helpers -----------------------------
 
@@ -37,8 +45,14 @@ def _effective_level(o: Orb) -> int:
 
 
 def orb_key(o: Orb) -> tuple:
-    """Stable identity for an orb across processes."""
+    """Stable identity for an orb across processes and duplicate-stat inventories."""
+    stable_id = getattr(o, "id", None)
+    if stable_id is None:
+        stable_id = getattr(o, "_idx", None)
+    if stable_id is None:
+        stable_id = id(o)
     return (
+        stable_id,
         getattr(o, "type", None),
         getattr(o, "set", None),
         getattr(o, "value", None),
@@ -95,14 +109,16 @@ def _score_combo_batch(
             used = {orb_key(o) for o in combo}
             flex_sum = 0.0
             for future_cat in remaining_names:
-                total = len(valid_combos_by_cat[future_cat])
+                all_combos = valid_combos_by_cat[future_cat]
+                total = len(all_combos)
                 if total == 0:
                     continue
+                combos = all_combos[:FLEX_SAMPLE_LIMIT] if total > FLEX_SAMPLE_LIMIT else all_combos
                 free = sum(
-                    1 for c in valid_combos_by_cat[future_cat]
+                    1 for c in combos
                     if not (used & {orb_key(o) for o in c})
                 )
-                flex_sum += (free / total)
+                flex_sum += (free / len(combos))
             flex = flex_sum / len(remaining_names)
 
         # Soft set hint
@@ -142,13 +158,19 @@ class UnifiedOptimizer:
 
     The `inputs` object is expected to expose:
       - inputs.orbs: List[Orb]
-      - inputs.categories: List[Category]
-      - inputs.profiles: List[ProfileConfig]
+      - inputs.profiles: List[ProfileConfig]  (categories are attached per profile)
       - inputs.shareable_categories: Optional[List[str]]
-    (Duck-typed; no hard import from the CLI module.)
     """
 
-    def __init__(self, *, logger, inputs: Any, topk_per_category: int = 12):
+    def __init__(
+        self,
+        *,
+        logger,
+        inputs: Any,
+        topk_per_category: int = 20,
+        parallelism: str = "auto",
+        max_time_ms: int = 5000,
+    ):
         self.logger = logger
         self.P = inputs  # shared parsed data prepared by the CLI/root
         if not getattr(self.P, "profiles", None):
@@ -156,7 +178,28 @@ class UnifiedOptimizer:
 
         # Optimizer-specific knobs
         self.topk = int(max(1, topk_per_category))
+        self.parallelism = str(parallelism or "auto").lower()
+        self.max_time_ms = max(1, int(max_time_ms))
         self.shareable = set(getattr(self.P, "shareable_categories", None) or [])
+
+        # Normalize categories from profile-attached configs (or optional top-level list if present).
+        input_categories = getattr(self.P, "categories", None)
+        if input_categories:
+            self.categories: List[Category] = list(input_categories)
+        else:
+            cat_slots: Dict[str, int] = {}
+            for prof in self.P.profiles:
+                for cat in getattr(prof, "categories", None) or []:
+                    cat_slots[cat.name] = max(cat_slots.get(cat.name, 0), int(cat.slots))
+            self.categories = [Category(name=name, slots=slots) for name, slots in cat_slots.items()]
+        if not self.categories:
+            raise ValueError("At least one category with slots is required")
+
+        self._slots_by_profile: Dict[str, Dict[str, int]] = {}
+        for prof in self.P.profiles:
+            self._slots_by_profile[prof.name] = {
+                cat.name: int(cat.slots) for cat in (getattr(prof, "categories", None) or [])
+            }
 
         # Score caches
         self._orb_base_scores: Dict[tuple, float] = {}
@@ -179,7 +222,7 @@ class UnifiedOptimizer:
 
         # Precompute valid combos per category (no duplicate types)
         self._valid_combos_by_cat: Dict[str, List[Tuple[Orb, ...]]] = {}
-        for cat in self.P.categories:
+        for cat in self.categories:
             combos = [c for c in combinations(self.P.orbs, cat.slots)
                       if len({o.type for o in c}) == len(c)]
             self._valid_combos_by_cat[cat.name] = combos
@@ -189,7 +232,7 @@ class UnifiedOptimizer:
 
         # Logs
         self.logger.info("📊 Category Analysis:")
-        for cat in self.P.categories:
+        for cat in self.categories:
             total = len(self._valid_combos_by_cat[cat.name])
             slots_needed = cat.slots if cat.name in self.shareable else cat.slots * len(self.P.profiles)
             combos_per_slot = (total / slots_needed) if slots_needed else 0.0
@@ -276,9 +319,18 @@ class UnifiedOptimizer:
             secondary += p.weight * p2
         return (primary, secondary)
 
+    def _within_set_caps(self, assignments: Dict[str, Dict[str, List[Orb]]]) -> bool:
+        for prof in self.P.profiles:
+            counts = Counter(o.set for group in assignments[prof.name].values() for o in group)
+            for set_name, count in counts.items():
+                cap = SET_MAX_COUNTS.get(set_name)
+                if cap is not None and count > cap:
+                    return False
+        return True
+
     # --------------------------- optimization ---------------------------
 
-    def optimize(self, beam_width: int = 200) -> Dict[str, Dict[str, Any]]:
+    def optimize(self, beam_width: int = 200) -> MultiProfileResult:
         """Run the joint BEAM search optimization."""
         self.logger.info("⚙️ Starting optimization in BEAM mode...")
         return self._beam_search(beam_width)
@@ -298,13 +350,14 @@ class UnifiedOptimizer:
             new_assign[p.name] = new_pmap
         return new_assign
 
-    def _beam_search(self, beam_width: int) -> Dict[str, Any]:
-        start_assign = {p.name: {c.name: [] for c in self.P.categories} for p in self.P.profiles}
+    def _beam_search(self, beam_width: int) -> MultiProfileResult:
+        started = time.perf_counter()
+        start_assign = {p.name: {c.name: [] for c in self.categories} for p in self.P.profiles}
         partials = [{"assign": start_assign, "used_ids": set(), "key": (0.0, 0.0)}]
 
         # Order categories (smallest spaces first)
         cats_info = []
-        for cat in self.P.categories:
+        for cat in self.categories:
             total_combos = len(self._valid_combos_by_cat[cat.name])
             slot_demand = cat.slots if cat.name in self.shareable else cat.slots * len(self.P.profiles)
             combo_size_score = math.log10(total_combos) if total_combos > 0 else 0.0
@@ -320,6 +373,12 @@ class UnifiedOptimizer:
         cats = [c[0] for c in cats_info]
 
         for cat_idx, cat in enumerate(cats):
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            if elapsed_ms >= float(self.max_time_ms):
+                self.logger.warning(
+                    f"⏱️ Beam time budget reached at {elapsed_ms:.0f}ms; returning best partial assignment."
+                )
+                break
             adaptive_beam = self._get_adaptive_beam_width(cat_idx, len(cats), beam_width)
             adaptive_topk = self._get_adaptive_topk(cat.name)
 
@@ -340,7 +399,7 @@ class UnifiedOptimizer:
             # Score combos
             combos = self._valid_combos_by_cat[cat.name]
             total_combos = len(combos)
-            batch_size = 1000
+            batch_size = 200
             num_procs = min(8, max(1, math.ceil(total_combos / max(1, batch_size))))
             batches = [combos[i:i + batch_size] for i in range(0, total_combos, batch_size)]
 
@@ -352,17 +411,57 @@ class UnifiedOptimizer:
                 ctx = dict(mp_base_ctx)
                 ctx["profile_dict"] = profile_dict
                 scored: List[tuple[float, tuple[Orb, ...]]] = []
-                with ProcessPoolExecutor(max_workers=num_procs) as executor:
-                    future_to_batch = {executor.submit(_score_combo_batch, batch, ctx): i for i, batch in enumerate(batches)}
+
+                def _run_parallel(executor_cls: Any, label: str) -> bool:
+                    try:
+                        with executor_cls(max_workers=num_procs) as executor:
+                            future_to_batch = {
+                                executor.submit(_score_combo_batch, batch, ctx): i
+                                for i, batch in enumerate(batches)
+                            }
+                            completed = 0
+                            for fut in concurrent.futures.as_completed(future_to_batch):
+                                batch_idx = future_to_batch[fut]
+                                scored.extend(fut.result())
+                                completed += len(batches[batch_idx])
+                                self.logger.info(
+                                    f"   • [{label}] Evaluated {completed}/{total_combos} combinations "
+                                    f"({(completed/total_combos*100 if total_combos else 100):.1f}%)"
+                                )
+                        return True
+                    except Exception as exc:
+                        self.logger.warning(f"⚠️ {label} executor failed ({exc}); falling back.")
+                        return False
+
+                def _run_serial() -> None:
                     completed = 0
-                    for fut in concurrent.futures.as_completed(future_to_batch):
-                        batch_idx = future_to_batch[fut]
-                        scored.extend(fut.result())
-                        completed += len(batches[batch_idx])
+                    for batch in batches:
+                        if ((time.perf_counter() - started) * 1000.0) >= float(self.max_time_ms):
+                            self.logger.warning(
+                                "⏱️ Beam time budget reached during scoring; using partial scored batch set."
+                            )
+                            break
+                        scored.extend(_score_combo_batch(batch, ctx))
+                        completed += len(batch)
                         self.logger.info(
-                            f"   • Evaluated {completed}/{total_combos} combinations "
+                            f"   • [serial] Evaluated {completed}/{total_combos} combinations "
                             f"({(completed/total_combos*100 if total_combos else 100):.1f}%)"
                         )
+
+                if num_procs <= 1 or self.parallelism == "serial":
+                    _run_serial()
+                elif self.parallelism == "thread":
+                    if not _run_parallel(ThreadPoolExecutor, "thread"):
+                        _run_serial()
+                elif self.parallelism == "process":
+                    if not _run_parallel(ProcessPoolExecutor, "process"):
+                        if not _run_parallel(ThreadPoolExecutor, "thread"):
+                            _run_serial()
+                else:  # auto
+                    if not _run_parallel(ProcessPoolExecutor, "process"):
+                        if not _run_parallel(ThreadPoolExecutor, "thread"):
+                            _run_serial()
+
                 scored.sort(key=lambda x: x[0], reverse=True)
                 return scored
 
@@ -398,15 +497,11 @@ class UnifiedOptimizer:
                 next_states = self._expand_with_lists(partials, full_lists, cat)
                 if not next_states:
                     total_full = len(self._valid_combos_by_cat[cat.name])
-                    self.logger.error(
-                        "❌ Still no feasible states after full retry. "
-                        f"Category={cat.name}, combos={total_full}, shareable={cat.name in self.shareable}. "
-                        "Likely every candidate collides with already-used orbs from previous categories."
+                    self.logger.warning(
+                        "⚠️ No feasible states after full retry; returning best partial assignment so far. "
+                        f"Category={cat.name}, combos={total_full}, shareable={cat.name in self.shareable}."
                     )
-                    raise RuntimeError(
-                        f"No feasible assignments for category '{cat.name}' with current beam/inventory constraints. "
-                        "Try increasing --beam or --topk, or removing this category from shareable_categories."
-                    )
+                    break
 
             next_states.sort(key=lambda s: s["key"], reverse=True)
             partials = next_states[:adaptive_beam]
@@ -421,14 +516,36 @@ class UnifiedOptimizer:
                 f"{(partials[0]['key'][0] if partials else 'N/A')}"
             )
 
-        # Finish
+        # Finish (if no states survive, return best partial start state)
         best_state = max(partials, key=lambda s: s["key"])
-        profiles_out: Dict[str, Any] = {}
+        primary, _ = self._key(best_state["assign"])
+
+        per_profile: Dict[str, ProfileResult] = {}
+        total_requested = 0
+        total_filled = 0
         for p in self.P.profiles:
             set_s, orb_s = self._score_one(p, best_state["assign"][p.name])
-            profiles_out[p.name] = {"set_score": set_s, "orb_score": orb_s, "loadout": best_state["assign"][p.name]}
-        primary, _ = self._key(best_state["assign"])
-        return {"combined_score": primary, "profiles": profiles_out, "assign": best_state["assign"]}
+            requested_slots = sum(self._slots_by_profile.get(p.name, {}).values())
+            filled_slots = sum(len(group) for group in best_state["assign"][p.name].values())
+            total_requested += requested_slots
+            total_filled += filled_slots
+            per_profile[p.name] = ProfileResult(
+                name=p.name,
+                set_score=set_s,
+                orb_score=orb_s,
+                loadout=best_state["assign"][p.name],
+                requested_slots=requested_slots,
+                filled_slots=filled_slots,
+                is_partial=filled_slots < requested_slots,
+            )
+
+        return MultiProfileResult(
+            profiles=per_profile,
+            combined_score=primary,
+            requested_slots=total_requested,
+            filled_slots=total_filled,
+            is_partial=total_filled < total_requested,
+        )
 
     # --------------------------- expansion helper ---------------------------
 
@@ -477,6 +594,8 @@ class UnifiedOptimizer:
                     if used_ids & ids:
                         continue
                     new_assign = self._copy_assign_with(state["assign"], cat.name, [c] * len(self.P.profiles))
+                    if not self._within_set_caps(new_assign):
+                        continue
                     new_used = used_ids | ids
                     key = self._key(new_assign)
                     out.append({"assign": new_assign, "used_ids": new_used, "key": key})
@@ -531,6 +650,8 @@ class UnifiedOptimizer:
                         continue
 
                 new_assign = self._copy_assign_with(state["assign"], cat.name, list(choices))
+                if not self._within_set_caps(new_assign):
+                    continue
                 key = self._key(new_assign)
                 out.append({"assign": new_assign, "used_ids": new_used, "key": key})
                 divergent_valid += 1
@@ -566,7 +687,7 @@ class UnifiedOptimizer:
             passes += 1
 
             for pname, p_assign in list(best.items()):
-                for cat in self.P.categories:
+                for cat in self.categories:
                     group = list(p_assign[cat.name])
                     types_in_cat = {o.type for o in group}
                     current_ids_group = _orb_ids(tuple(group))
@@ -615,11 +736,11 @@ class UnifiedOptimizer:
                             # Global inventory uniqueness constraints
                             ok = True
                             per_profile_used: dict[str, set[tuple]] = {pp: set() for pp in trial.keys()}
-                            cross_profile_used_by_cat: dict[str, set[tuple]] = {c2.name: set() for c2 in self.P.categories}
+                            cross_profile_used_by_cat: dict[str, set[tuple]] = {c2.name: set() for c2 in self.categories}
 
                             for pp, cats_map in trial.items():
                                 used_local = per_profile_used[pp]
-                                for c2 in self.P.categories:
+                                for c2 in self.categories:
                                     ids = _orb_ids(tuple(cats_map[c2.name]))
                                     if used_local & ids:
                                         ok = False
@@ -634,6 +755,9 @@ class UnifiedOptimizer:
                                 if not ok:
                                     break
                             if not ok:
+                                continue
+
+                            if not self._within_set_caps(trial):
                                 continue
 
                             k = self._key(trial)
@@ -664,7 +788,7 @@ class UnifiedOptimizer:
     def _calculate_reserved_orbs(self) -> Dict[str, Dict[str, List[Orb]]]:
         """Reserve top orbs for non-shareable categories with smarter allocation."""
         reserved: Dict[str, Dict[str, List[Orb]]] = {}
-        non_shareable_cats = [c for c in self.P.categories if c.name not in self.shareable]
+        non_shareable_cats = [c for c in self.categories if c.name not in self.shareable]
         if not non_shareable_cats:
             return reserved
 
@@ -677,7 +801,7 @@ class UnifiedOptimizer:
             return cat.slots if cat.name in self.shareable else cat.slots * len(self.P.profiles)
 
         total_slots = sum(slots_needed(c) for c in non_shareable_cats)
-        shareable_slots = sum(slots_needed(c) for c in self.P.categories if c.name in self.shareable)
+        shareable_slots = sum(slots_needed(c) for c in self.categories if c.name in self.shareable)
         reserve_ratio = (
             min(0.5, total_slots / (total_slots + shareable_slots))
             if (total_slots + shareable_slots)
