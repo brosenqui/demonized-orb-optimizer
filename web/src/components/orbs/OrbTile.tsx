@@ -1,6 +1,6 @@
 import React from "react";
 import { Button } from "../ui/button";
-import { Trash2 } from "lucide-react";
+import { Sparkles, Trash2 } from "lucide-react";
 import type { OrbIn } from "../../lib/types";
 import {
   TYPE_ICON,
@@ -83,10 +83,16 @@ export default function OrbTile({
         </div>
       )}
 
-      {/* Level pill top-right */}
-      {showLevel && orb.level > 0 && (
-        <div className="absolute top-2 right-2">
-          <span className={levelPill}>+{orb.level}</span>
+      {/* Awakened + level pills top-right */}
+      {(orb.awakened > 0 || (showLevel && orb.level > 0)) && (
+        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+          {orb.awakened > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+              <Sparkles className="h-3 w-3" />
+              A+{orb.awakened}
+            </span>
+          )}
+          {showLevel && orb.level > 0 && <span className={levelPill}>+{orb.level}</span>}
         </div>
       )}
 

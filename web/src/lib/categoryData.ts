@@ -1,5 +1,5 @@
 // Canonical categories for the optimizer UI
-export const CATEGORIES = ["Soul", "Wings", "Ego", "Beast", "Wagon"] as const;
+export const CATEGORIES = ["Soul", "Wings", "Ego", "Beast", "Wagon", "Spirit Souls"] as const;
 
 // Category rarity choices (categories don't use Common/Magic)
 export const CATEGORY_RARITY_CHOICES = ["Rare", "Epic", "Legendary", "Mythic"] as const;

@@ -18,6 +18,13 @@ def _require_keys(d: Dict[str, Any], keys: Iterable[str], where: str) -> None:
     if missing:
         raise ValueError(f"Missing keys {missing} in {where}")
 
+def _coerce_awakened_level(value: Any) -> int:
+    try:
+        numeric = int(float(value))
+    except Exception:
+        return 0
+    return max(0, numeric)
+
 
 def parse_orbs(data: Any, logger: "Logger | None" = None) -> List[Orb]:
     """Validate and convert a list of orb dicts -> List[Orb] with level clipping."""
@@ -50,6 +57,7 @@ def parse_orbs(data: Any, logger: "Logger | None" = None) -> List[Orb]:
                 rarity=str(item["rarity"]),
                 value=parse_value(item["value"]),
                 level=lvl,
+                awakened=_coerce_awakened_level(item.get("awakened", 0)),
             )
         )
     return out

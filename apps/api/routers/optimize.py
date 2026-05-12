@@ -40,6 +40,13 @@ def _dc_to_dict(obj: Any) -> Any:
             pass
     return obj
 
+def _as_non_negative_int(value: Any) -> int:
+    try:
+        numeric = int(float(value))
+    except Exception:
+        return 0
+    return max(0, numeric)
+
 
 def _profile_categories_from(req_profile: OptimizeProfileIn) -> List[Category]:
     """Build Category list for a single OptimizeProfileIn request object."""
@@ -91,7 +98,7 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
                 "set_score": number|null,
                 "orb_score": number|null,
                 "used_slots": { [category]: int },
-                "assignments": { [category]: [ {type,set,rarity,value,level,slot_index?}, ... ] }
+                "assignments": { [category]: [ {type,set,rarity,value,level,awakened,slot_index?}, ... ] }
               },
               ...
             ]
@@ -172,6 +179,7 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
                         "rarity": d.get("rarity"),
                         "value": d.get("value"),
                         "level": d.get("level"),
+                        "awakened": _as_non_negative_int(d.get("awakened", 0)),
                         "slot_index": d.get("slot_index"),
                     }
                 )

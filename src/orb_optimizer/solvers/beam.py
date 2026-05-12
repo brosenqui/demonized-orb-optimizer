@@ -15,12 +15,25 @@ from typing import Any, Dict, List, Tuple, Optional
 from ..models import Orb, Category, ProfileConfig
 from ..defaults import DEFAULT_SET_COUNTS
 
-
 # ----------------------------- helpers -----------------------------
 
 def _tiers_from_level(level: int) -> int:
     """Return how many level tiers are unlocked at 3, 6, 9."""
     return (1 if level >= 3 else 0) + (1 if level >= 6 else 0) + (1 if level >= 9 else 0)
+
+def _awakened_levels(o: Orb) -> int:
+    try:
+        value = int(getattr(o, "awakened", 0))
+    except Exception:
+        value = 0
+    return max(0, value)
+
+def _effective_level(o: Orb) -> int:
+    try:
+        base_level = int(getattr(o, "level", 0))
+    except Exception:
+        base_level = 0
+    return max(0, base_level) + _awakened_levels(o)
 
 
 def orb_key(o: Orb) -> tuple:
@@ -30,6 +43,7 @@ def orb_key(o: Orb) -> tuple:
         getattr(o, "set", None),
         getattr(o, "value", None),
         getattr(o, "level", None),
+        _awakened_levels(o),
     )
 
 
@@ -206,7 +220,7 @@ class UnifiedOptimizer:
                 raw = 0.0
             k = orb_key(orb)
             self._orb_base_scores[k] = self._percentile_within_type(orb.type, raw)
-            self._orb_level_scores[k] = _tiers_from_level(orb.level)
+            self._orb_level_scores[k] = _tiers_from_level(_effective_level(orb))
         self.logger.info("✓ Finished precomputing scores for %d orbs", len(self.P.orbs))
 
     def _percentile_within_type(self, t: str, v: float) -> float:
@@ -670,7 +684,14 @@ class UnifiedOptimizer:
             else 0.0
         )
 
-        sorted_by_type = {t: sorted(orbs, key=lambda o: float(o.value), reverse=True) for t, orbs in orbs_by_type.items()}
+        sorted_by_type = {
+            t: sorted(
+                orbs,
+                key=lambda o: float(o.value) + (_tiers_from_level(_effective_level(o)) * 0.1),
+                reverse=True,
+            )
+            for t, orbs in orbs_by_type.items()
+        }
 
         # First pass: minimal reservations per non-shareable category
         orbs_taken: Dict[str, set] = defaultdict(set)

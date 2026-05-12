@@ -14,8 +14,7 @@ import {
   CommandItem,
 } from "../ui/command";
 import { Checkbox } from "../ui/checkbox";
-
-const CATEGORIES = ["Soul", "Wings", "Ego", "Beast", "Wagon"] as const;
+import { CATEGORIES } from "@/lib/categoryData";
 
 type Props = {
   value: string[];                // current shareable categories

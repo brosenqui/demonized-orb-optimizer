@@ -26,6 +26,7 @@ export type OrbIn = {
   rarity: string;
   value: number;
   level: number;
+  awakened: number;
 };
 
 export type OptimizeProfileIn = {
@@ -38,8 +39,8 @@ export type OptimizeProfileIn = {
   orb_weights: Record<string, number>;
   orb_level_weights: Record<string, number>;
 
-  // NEW: per-profile category settings
-  category_rarity?: Record<string, "Rare" | "Epic" | "Legendary" | "Mythic">;
+  // per-profile category settings
+  categories?: Record<string, "Rare" | "Epic" | "Legendary" | "Mythic">;
   slots?: Record<string, number>; // optional direct slots override
 };
 
@@ -70,6 +71,7 @@ export type OptimizeResponse = {
           rarity: string;
           value: number;
           level: number;
+          awakened: number;
           slot_index?: number;
         }>>;
       }>;

@@ -118,7 +118,7 @@ export default function OrbsFilterBar({
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Type, set, or rarity"
+            placeholder="Type, set, rarity, awakened level"
             className="w-[220px]"
           />
         </div>

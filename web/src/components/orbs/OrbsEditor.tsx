@@ -54,6 +54,7 @@ export default function OrbsEditor({
     rarity: "Rare",
     value: 0,
     level: 0,
+    awakened: 0,
   }));
   const [filtersOpen, setFiltersOpen] = useState(true);
   const {
@@ -126,6 +127,7 @@ export default function OrbsEditor({
       rarity: "Rare",
       value: 0,
       level: 0,
+      awakened: 0,
     });
     setOpenForm(true);
   }
@@ -139,6 +141,7 @@ export default function OrbsEditor({
       rarity: o.rarity,
       value: o.value,
       level: o.level,
+      awakened: Math.max(0, Math.floor(Number(o.awakened) || 0)),
     });
     setOpenForm(true);
   }
@@ -150,6 +153,7 @@ export default function OrbsEditor({
       rarity: form.rarity,
       value: clamp(Number(form.value) || 0),
       level: clamp(Number(form.level) || 0, 0, 9),
+      awakened: Math.max(0, Math.floor(Number(form.awakened) || 0)),
     };
     if (editingIndex === null) {
       setOrbs([...orbs, cleaned]);
@@ -164,7 +168,7 @@ export default function OrbsEditor({
   return (
     <Section
       title="Orbs"
-      helpText="Enter and manage your collection of orbs here. You can add orbs manually, import JSON, adjust display density, and filter/sort with search, type, set, rarity, and level."
+      helpText="Enter and manage your collection of orbs here. You can add orbs manually, import JSON, set awakened levels, adjust display density, and filter/sort with search, type, set, rarity, and level."
       actions={
         <div className="flex gap-2 items-center">
           {/* Density selector */}
@@ -213,7 +217,7 @@ export default function OrbsEditor({
                 </div>
 
                 <Textarea
-                  placeholder={`[\n  { "type": "Flame", "set": "Lucifer", "rarity": "Rare", "value": 0, "level": 1 },\n  { "type": "Steel", "set": "Mammon", "rarity": "Legendary", "value": 12.5, "level": 8 }\n]`}
+                  placeholder={`[\n  { "type": "Flame", "set": "Lucifer", "rarity": "Rare", "value": 0, "level": 1, "awakened": 2 },\n  { "type": "Steel", "set": "Mammon", "rarity": "Legendary", "value": 12.5, "level": 8, "awakened": 0 }\n]`}
                   className="min-h-[180px]"
                   value={jsonText}
                   onChange={(e) => setJsonText(e.target.value)}

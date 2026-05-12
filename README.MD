@@ -155,6 +155,7 @@ Example:
   "shareable_categories": [
     "Wings",
     "Wagon",
+    "Spirit Souls",
     "Beast"
   ]
 }

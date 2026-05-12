@@ -58,7 +58,9 @@ export function useOrbFilters(orbs: OrbIn[]) {
         const levelOk = orb.level >= levelMin && orb.level <= levelMax;
         const searchOk =
           normalizedSearchQuery === "" ||
-          `${orb.type} ${orb.set} ${orb.rarity}`.toLowerCase().includes(normalizedSearchQuery);
+          `${orb.type} ${orb.set} ${orb.rarity} awakened ${orb.awakened}`
+            .toLowerCase()
+            .includes(normalizedSearchQuery);
         return typeOk && setOk && rarityOk && levelOk && searchOk;
       });
 
@@ -75,6 +77,8 @@ export function useOrbFilters(orbs: OrbIn[]) {
       if (rarityOrderA !== rarityOrderB) return rarityOrderB - rarityOrderA;
 
       if (orbA.level !== orbB.level) return orbB.level - orbA.level;
+
+      if (orbA.awakened !== orbB.awakened) return orbB.awakened - orbA.awakened;
 
       const setOrderA = setIdx.get(orbA.set) ?? Number.MAX_SAFE_INTEGER;
       const setOrderB = setIdx.get(orbB.set) ?? Number.MAX_SAFE_INTEGER;

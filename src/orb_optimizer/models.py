@@ -19,6 +19,7 @@ class Orb:
         rarity: The rarity tier of the orb (e.g., 'Rare', 'Legendary').
         value: The numeric value representing this orb's stat bonus.
         level: The orb's current upgrade level (default 0).
+        awakened: Additional awakened levels on this orb.
     """
 
     type: str
@@ -26,11 +27,12 @@ class Orb:
     rarity: str
     value: float
     level: int = 0
+    awakened: int = 0
 
     def __repr__(self) -> str:
         return (
             f"Orb(type='{self.type}', set='{self.set}', "
-            f"rarity='{self.rarity}', value={self.value}, level={self.level})"
+            f"rarity='{self.rarity}', value={self.value}, level={self.level}, awakened={self.awakened})"
         )
 
 
@@ -150,6 +152,7 @@ class AssignedOrb:
     rarity: str
     level: int
     value: float
+    awakened: int = 0
     slot_index: Optional[int] = None  # for display/debug
 
 @dataclass

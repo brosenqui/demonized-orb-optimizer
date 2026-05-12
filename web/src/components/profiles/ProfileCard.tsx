@@ -13,6 +13,7 @@ import KvSelectTable from "../ui/KvSelectTable";
 import { objectiveOptions, type OptimizeProfileIn, type Rarity } from "../../lib/types";
 import { cn } from "../../lib/utils";
 import { HelpTooltip } from "../ui/helpToolTip";
+import { CATEGORIES } from "@/lib/categoryData";
 
 // rarity styles + mapping
 const rarityBgClass: Record<Rarity, string> = {
@@ -28,7 +29,6 @@ const rarityRingClass: Record<Rarity, string> = {
   Mythic: "ring-rose-300",
 };
 const RARITIES: Rarity[] = ["Rare", "Epic", "Legendary", "Mythic"];
-const CATEGORIES = ["Soul", "Wings", "Ego", "Beast", "Wagon"] as const;
 const CLEAR_VALUE = "__none__" as const; // sentinel for clearing
 
 type Props = {

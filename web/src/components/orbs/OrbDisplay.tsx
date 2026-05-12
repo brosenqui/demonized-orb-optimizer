@@ -74,13 +74,20 @@ export function showDetailsForDensity(d: Density) {
 // Simple clamp
 export const clamp = (n: number, min = 0, max = Number.POSITIVE_INFINITY) => Math.max(min, Math.min(max, n));
 
+function toNonNegativeInt(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.floor(numeric));
+}
+
 // Normalize an incoming raw JSON orb to OrbIn
 export function normalizeOrb(raw: any): OrbIn | null {
   const type = String(raw?.type ?? "").trim();
-  const set = String(raw?.set ?? raw?.set ?? "").trim();
+  const set = String(raw?.set ?? raw?.set_name ?? "").trim();
   const rarity = String(raw?.rarity ?? "Rare").trim();
   const valueNum = Number(raw?.value ?? 0);
   const levelNum = Number(raw?.level ?? 0);
+  const awakened = toNonNegativeInt(raw?.awakened);
 
   if (!type || !set) return null;
 
@@ -94,5 +101,6 @@ export function normalizeOrb(raw: any): OrbIn | null {
     rarity: rarity as OrbIn["rarity"],
     value,
     level,
+    awakened,
   };
 }

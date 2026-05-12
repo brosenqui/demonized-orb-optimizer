@@ -33,6 +33,13 @@ from .defaults import (
 if TYPE_CHECKING:
     from logging import Logger
 
+def _coerce_awakened_level(value: Any) -> int:
+    try:
+        numeric = int(float(value))
+    except Exception:
+        return 0
+    return max(0, numeric)
+
 
 class DataLoader:
     """Handles loading and normalization of game data files (thresholds-only)."""
@@ -79,6 +86,7 @@ class DataLoader:
                         rarity=rarity,
                         value=parse_value(item["value"]),
                         level=lvl,
+                        awakened=_coerce_awakened_level(item.get("awakened", 0)),
                     )
                 )
             except KeyError as e:

@@ -25,6 +25,7 @@ export type OrbFormState = {
   rarity: OrbIn["rarity"];
   value: number;
   level: number;
+  awakened: number;
 };
 
 type OrbFormDialogProps = {
@@ -139,6 +140,23 @@ export default function OrbFormDialog({
                 setForm((current) => ({
                   ...current,
                   level: clamp(Number.isFinite(numeric) ? numeric : 0, 0, 9),
+                }));
+              }}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm">Awakened Levels</label>
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              value={form.awakened}
+              onChange={(event) => {
+                const numeric = Number(event.target.value);
+                setForm((current) => ({
+                  ...current,
+                  awakened: Math.max(0, Math.floor(Number.isFinite(numeric) ? numeric : 0)),
                 }));
               }}
             />

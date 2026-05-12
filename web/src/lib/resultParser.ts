@@ -1,6 +1,12 @@
 // src/lib/resultParser.ts
 import type { OrbIn } from "./types";
 
+function parseAwakened(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.floor(numeric));
+}
+
 /** Normalize one raw orb object to OrbIn. */
 function toOrbIn(raw: any): OrbIn {
   const type = String(raw?.type ?? "").trim();
@@ -8,6 +14,7 @@ function toOrbIn(raw: any): OrbIn {
   const rarity = String(raw?.rarity ?? "Rare").trim();
   const value = Number.isFinite(Number(raw?.value)) ? Number(raw?.value) : 0;
   const level = Number.isFinite(Number(raw?.level)) ? Number(raw?.level) : 0;
+  const awakened = parseAwakened(raw?.awakened);
 
   return {
     type: type || "Unknown",
@@ -15,6 +22,7 @@ function toOrbIn(raw: any): OrbIn {
     rarity: (rarity as OrbIn["rarity"]) || "Rare",
     value,
     level,
+    awakened,
   };
 }
 

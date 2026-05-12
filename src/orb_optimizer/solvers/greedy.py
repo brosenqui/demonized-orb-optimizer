@@ -52,6 +52,20 @@ def get_set(o: Orb) -> str:
     """Robust accessor for set name, accepting either .set or .set."""
     return getattr(o, "set", None) or getattr(o, "set", "") or ""
 
+def awakened_levels(o: Any) -> int:
+    try:
+        value = int(getattr(o, "awakened", 0))
+    except Exception:
+        value = 0
+    return max(0, value)
+
+def effective_level(o: Any) -> int:
+    try:
+        base_level = int(getattr(o, "level", 0))
+    except Exception:
+        base_level = 0
+    return max(0, base_level) + awakened_levels(o)
+
 
 def strong_orb_key(o: Orb) -> tuple:
     """Strong identity to prevent accidental reuse AND allow true duplicates.
@@ -73,6 +87,7 @@ def strong_orb_key(o: Orb) -> tuple:
         getattr(o, "rarity", None),
         getattr(o, "level", None),
         getattr(o, "value", None),
+        awakened_levels(o),
     )
 
 
@@ -162,7 +177,13 @@ class GreedyOptimizer:
         for o in self.orbs:
             by_type[o.type].append(o)
         for t, typed in by_type.items():
-            typed.sort(key=lambda o: (float(getattr(o, "value", 0.0)) + tiers_from_level(getattr(o, "level", 0))), reverse=True)
+            typed.sort(
+                key=lambda o: (
+                    float(getattr(o, "value", 0.0))
+                    + tiers_from_level(effective_level(o))
+                ),
+                reverse=True,
+            )
             self._candidates_by_type[t] = typed[: self.topk]
 
         self.logger.info(
@@ -254,6 +275,7 @@ class GreedyOptimizer:
                             rarity=getattr(best_orb, "rarity", "Rare"),
                             level=int(getattr(best_orb, "level", 0)),
                             value=float(getattr(best_orb, "value", 0.0)),
+                            awakened=awakened_levels(best_orb),
                             slot_index=slot_index,
                         )
                         assign[p.name][cat].append(assigned)
@@ -316,6 +338,7 @@ class GreedyOptimizer:
                             rarity=getattr(best_orb, "rarity", "Rare"),
                             level=int(getattr(best_orb, "level", 0)),
                             value=float(getattr(best_orb, "value", 0.0)),
+                            awakened=awakened_levels(best_orb),
                             slot_index=slot_index,
                         )
                         assign[p.name][cat].append(assigned)
@@ -385,8 +408,9 @@ class GreedyOptimizer:
         d_orb = base * prof.orb_type_weights.get(getattr(orb, "type", ""), 1.0)
 
         # Optional: level-based component (adjust to match your CLI’s exact convention)
-        lvl_tiers = tiers_from_level(getattr(orb, "level", 0))
-        d_orb += prof.orb_level_weights.get(str(getattr(orb, "level", 0)), 0.0) * 1.0
+        orb_level = effective_level(orb)
+        lvl_tiers = tiers_from_level(orb_level)
+        d_orb += prof.orb_level_weights.get(str(orb_level), 0.0) * 1.0
         d_orb += lvl_tiers * prof.orb_level_weights.get(getattr(orb, "type", ""), 0.0)
 
         return d_set, d_orb
@@ -419,8 +443,9 @@ class GreedyOptimizer:
             base = percentile_within_type(self._type_values, getattr(ao, "type", ""), raw)
             orb_score += base * prof.orb_type_weights.get(getattr(ao, "type", ""), 1.0)
 
-            lvl_tiers = tiers_from_level(getattr(ao, "level", 0))
-            orb_score += prof.orb_level_weights.get(str(getattr(ao, "level", 0)), 0.0) * 1.0
+            orb_level = effective_level(ao)
+            lvl_tiers = tiers_from_level(orb_level)
+            orb_score += prof.orb_level_weights.get(str(orb_level), 0.0) * 1.0
             orb_score += lvl_tiers * prof.orb_level_weights.get(getattr(ao, "type", ""), 0.0)
 
         return set_score, orb_score

@@ -11,6 +11,7 @@ class OrbIn(BaseModel):
     rarity: str
     value: float
     level: int
+    awakened: int = 0
 
 class OrbOut(BaseModel):
     type: str
@@ -18,6 +19,7 @@ class OrbOut(BaseModel):
     rarity: Rarity
     value: float
     level: int
+    awakened: int = 0
     slot_index: Optional[int] = None  # allowed but optional
 
 class ProfileRaw(BaseModel):

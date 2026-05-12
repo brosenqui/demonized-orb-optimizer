@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import OrbGrid from "../orbs/OrbGrid";
 import type { OrbIn } from "@/lib/types";
+import { CATEGORIES } from "@/lib/categoryData";
 
 // shadcn table
 import {
@@ -26,7 +27,7 @@ export default function ProfileResult({
   profileName: string;
   assignments: Assignments;
 }) {
-  const CATEGORY_ORDER = ["Soul", "Wings", "Ego", "Wagon", "Beast"];
+  const CATEGORY_ORDER = [...CATEGORIES];
 
   const categories = useMemo(() => {
     const cats = Object.keys(assignments ?? {});
