@@ -1,6 +1,6 @@
 // src/lib/priorityTemplates.ts
 import { OrbType, OrbSet } from "./orbData";
-import type { OptimizeProfileIn } from "./types";
+import type { CategoryRarity, Objective, OptimizeProfileIn } from "./types";
 
 /**
  * Baseline defaults used when (re)applying templates.
@@ -25,16 +25,16 @@ export type PriorityTemplate = {
   description?: string;
 
   // Core knobs your profiles already have
-  objective?: string;
+  objective?: Objective;
   power?: number;
   epsilon?: number;
 
-  categories?: Record<string, string>;
+  categories?: Record<string, CategoryRarity>;
 
   // Optional weight maps (only applied if you use them in OptimizeProfileIn)
-  set_priority?: Record<OrbSet, number>;
-  orb_weights?: Record<OrbType, number>;
-  orb_level_weights?: Record<OrbType, number>;
+  set_priority?: Partial<Record<OrbSet, number>>;
+  orb_weights?: Partial<Record<OrbType, number>>;
+  orb_level_weights?: Partial<Record<OrbType, number>>;
 };
 
 export const PRIORITY_TEMPLATES: PriorityTemplate[] = [

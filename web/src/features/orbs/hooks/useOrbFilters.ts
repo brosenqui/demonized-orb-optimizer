@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import type { OrbIn } from "../../lib/types";
-import { ORB_SETS, ORB_TYPES } from "../../lib/orbData";
+import type { OrbIn } from "@/lib/types";
+import { ORB_SETS, ORB_TYPES } from "@/lib/orbData";
 
 const DEFAULT_LEVEL_MIN = 0;
 const DEFAULT_LEVEL_MAX = 9;

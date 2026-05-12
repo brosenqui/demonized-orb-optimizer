@@ -1,4 +1,4 @@
-const KEY = "orbopt_state_v1"; // bump this if you change the shape
+const KEY = "orbopt_state_v2"; // bump when persisted shape changes
 
 export type PersistedState<T = unknown> = T;
 

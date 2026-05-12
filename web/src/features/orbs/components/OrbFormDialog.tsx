@@ -1,22 +1,23 @@
 import type { Dispatch, SetStateAction } from "react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "../ui/dialog";
+} from "@/components/ui/dialog";
 import {
   Select as UiSelect,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
-import { rarityOptions, type OrbIn } from "../../lib/types";
-import { ORB_SETS, ORB_TYPES } from "../../lib/orbData";
+} from "@/components/ui/select";
+import { rarityOptions, type OrbIn } from "@/lib/types";
+import { ORB_SETS, ORB_TYPES } from "@/lib/orbData";
 import { clamp } from "./OrbDisplay";
 
 export type OrbFormState = {
@@ -50,18 +51,21 @@ export default function OrbFormDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Orb" : "Add Orb"}</DialogTitle>
+          <DialogDescription>
+            Set orb type, set, rarity, value, level, and awakened levels.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid sm:grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label className="text-sm">Type</label>
+            <label className="text-sm" htmlFor="orb-form-type">Type</label>
             <UiSelect
               value={form.type}
               onValueChange={(value) =>
                 setForm((current) => ({ ...current, type: value as OrbIn["type"] }))
               }
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full" id="orb-form-type">
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
               <SelectContent>
@@ -75,14 +79,14 @@ export default function OrbFormDialog({
           </div>
 
           <div className="space-y-1">
-            <label className="text-sm">Set</label>
+            <label className="text-sm" htmlFor="orb-form-set">Set</label>
             <UiSelect
               value={form.set}
               onValueChange={(value) =>
                 setForm((current) => ({ ...current, set: value as OrbIn["set"] }))
               }
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full" id="orb-form-set">
                 <SelectValue placeholder="Set" />
               </SelectTrigger>
               <SelectContent>
@@ -96,14 +100,14 @@ export default function OrbFormDialog({
           </div>
 
           <div className="space-y-1">
-            <label className="text-sm">Rarity</label>
+            <label className="text-sm" htmlFor="orb-form-rarity">Rarity</label>
             <UiSelect
               value={form.rarity}
               onValueChange={(value) =>
                 setForm((current) => ({ ...current, rarity: value as OrbIn["rarity"] }))
               }
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full" id="orb-form-rarity">
                 <SelectValue placeholder="Rarity" />
               </SelectTrigger>
               <SelectContent>
@@ -117,8 +121,9 @@ export default function OrbFormDialog({
           </div>
 
           <div className="space-y-1">
-            <label className="text-sm">Value</label>
+            <label className="text-sm" htmlFor="orb-form-value">Value</label>
             <Input
+              id="orb-form-value"
               type="number"
               value={form.value}
               onChange={(event) =>
@@ -131,8 +136,9 @@ export default function OrbFormDialog({
           </div>
 
           <div className="space-y-1">
-            <label className="text-sm">Level</label>
+            <label className="text-sm" htmlFor="orb-form-level">Level</label>
             <Input
+              id="orb-form-level"
               type="number"
               value={form.level}
               onChange={(event) => {
@@ -146,8 +152,9 @@ export default function OrbFormDialog({
           </div>
 
           <div className="space-y-1">
-            <label className="text-sm">Awakened Levels</label>
+            <label className="text-sm" htmlFor="orb-form-awakened">Awakened Levels</label>
             <Input
+              id="orb-form-awakened"
               type="number"
               min={0}
               step={1}

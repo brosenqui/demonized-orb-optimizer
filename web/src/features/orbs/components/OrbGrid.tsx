@@ -1,11 +1,11 @@
 import React from "react";
 import OrbTile from "./OrbTile";
-import type { OrbIn } from "../../lib/types";
+import type { OrbIn } from "@/lib/types";
 import {
-  Density,
   gridClassForDensity,
   showDetailsForDensity,
 } from "./OrbDisplay";
+import type { Density } from "./OrbDisplay";
 
 type OrbGridProps = {
   orbs: OrbIn[];

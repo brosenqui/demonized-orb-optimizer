@@ -1,11 +1,10 @@
 import React from "react";
-import { Button } from "../ui/button";
+import { Button } from "@/components/ui/button";
 import { Sparkles, Trash2 } from "lucide-react";
-import type { OrbIn } from "../../lib/types";
+import type { OrbIn } from "@/lib/types";
 import {
   TYPE_ICON,
   rarityCardClass,
-  Density,
   iconSizeForDensity,
   typeSizeForDensity,
   valueSizeForDensity,
@@ -13,6 +12,7 @@ import {
   setBadgeForDensity,
   tileChromeForDensity,
 } from "./OrbDisplay";
+import type { Density } from "./OrbDisplay";
 
 type OrbTileProps = {
   orb: OrbIn;
@@ -46,6 +46,7 @@ export default function OrbTile({
   const levelPill = levelPillForDensity(density);
   const setBadge = setBadgeForDensity(density);
   const icon = TYPE_ICON[orb.type] ?? "🔮";
+  const orbLabel = `${orb.rarity} ${orb.type} orb from ${orb.set}`;
 
   return (
     <div
@@ -53,6 +54,7 @@ export default function OrbTile({
       onClick={clickable ? onClick : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : -1}
+      aria-label={clickable ? `Edit ${orbLabel}` : orbLabel}
       onKeyDown={
         clickable
           ? (e) => {
@@ -77,6 +79,7 @@ export default function OrbTile({
               onDelete();
             }}
             title="Delete orb"
+            aria-label={`Delete ${orbLabel}`}
           >
             <Trash2 className="h-4 w-4" />
           </Button>

@@ -1,7 +1,5 @@
 // Shared display constants/utilities for orb tiles & grids
 
-import type { OrbIn, Rarity } from "../../lib/types";
-
 // Emoji placeholders; swap for real SVGs later if you want.
 export const TYPE_ICON: Record<string, string> = {
   Flame: "🔥",
@@ -73,34 +71,3 @@ export function showDetailsForDensity(d: Density) {
 
 // Simple clamp
 export const clamp = (n: number, min = 0, max = Number.POSITIVE_INFINITY) => Math.max(min, Math.min(max, n));
-
-function toNonNegativeInt(value: unknown): number {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.max(0, Math.floor(numeric));
-}
-
-// Normalize an incoming raw JSON orb to OrbIn
-export function normalizeOrb(raw: any): OrbIn | null {
-  const type = String(raw?.type ?? "").trim();
-  const set = String(raw?.set ?? raw?.set_name ?? "").trim();
-  const rarity = String(raw?.rarity ?? "Rare").trim();
-  const valueNum = Number(raw?.value ?? 0);
-  const levelNum = Number(raw?.level ?? 0);
-  const awakened = toNonNegativeInt(raw?.awakened);
-
-  if (!type || !set) return null;
-
-  const value = Number.isFinite(valueNum) ? Math.max(0, valueNum) : 0;
-  let level = Number.isFinite(levelNum) ? levelNum : 0;
-  level = clamp(level, 0, 9);
-
-  return {
-    type: type as OrbIn["type"],
-    set: set as OrbIn["set"],
-    rarity: rarity as OrbIn["rarity"],
-    value,
-    level,
-    awakened,
-  };
-}

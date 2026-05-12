@@ -1,11 +1,11 @@
 import * as React from "react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 type Props = {
-  allTypes: string[];
-  allSets: string[];
-  allRarities: string[];
+  allTypes: readonly string[];
+  allSets: readonly string[];
+  allRarities: readonly string[];
   selectedTypes: string[];
   setSelectedTypes: (v: string[]) => void;
   selectedSets: string[];
@@ -18,12 +18,13 @@ type Props = {
   setLevelMax: (v: number) => void;
   searchQuery: string;
   setSearchQuery: (v: string) => void;
+  searchInputRef?: React.Ref<HTMLInputElement>;
   className?: string;
 };
 
 type ToggleGroupProps = {
   label: string;
-  options: string[];
+  options: readonly string[];
   selected: string[];
   setSelected: (values: string[]) => void;
   allTitle: string;
@@ -108,14 +109,17 @@ export default function OrbsFilterBar({
   setLevelMax,
   searchQuery,
   setSearchQuery,
+  searchInputRef,
   className = "",
 }: Props) {
   return (
     <div className={`space-y-3 ${className}`}>
       <div className="flex items-end gap-2 flex-wrap">
         <div className="space-y-1">
-          <label className="text-sm font-medium">Search</label>
+          <label className="text-sm font-medium" htmlFor="orbs-search-input">Search</label>
           <Input
+            id="orbs-search-input"
+            ref={searchInputRef}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Type, set, rarity, awakened level"
@@ -123,8 +127,9 @@ export default function OrbsFilterBar({
           />
         </div>
         <div className="space-y-1">
-          <label className="text-sm font-medium">Level Min</label>
+          <label className="text-sm font-medium" htmlFor="orbs-level-min">Level Min</label>
           <Input
+            id="orbs-level-min"
             type="number"
             min={0}
             max={9}
@@ -140,8 +145,9 @@ export default function OrbsFilterBar({
           />
         </div>
         <div className="space-y-1">
-          <label className="text-sm font-medium">Level Max</label>
+          <label className="text-sm font-medium" htmlFor="orbs-level-max">Level Max</label>
           <Input
+            id="orbs-level-max"
             type="number"
             min={0}
             max={9}

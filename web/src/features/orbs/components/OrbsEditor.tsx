@@ -1,33 +1,46 @@
-import React, { useRef, useState } from "react";
-import Section from "../ui/Section";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Textarea } from "../ui/textarea";
-import {
-  Dialog,
-  DialogTrigger,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "../ui/dialog";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Section from "@/components/ui/Section";
+import { Button } from "@/components/ui/button";
 import {
   Select as UiSelect,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "../ui/select";
+} from "@/components/ui/select";
 import { ChevronDown, ChevronUp, Filter, RotateCcw } from "lucide-react";
 
 import OrbGrid from "./OrbGrid";
+import OrbImportDialog from "./OrbImportDialog";
 import OrbsFilterBar from "./OrbsFilterBar";
 import OrbFormDialog, { type OrbFormState } from "./OrbFormDialog";
-import { useOrbFilters } from "./useOrbFilters";
-import { rarityOptions, type OrbIn } from "../../lib/types";
-import { ORB_TYPES, ORB_SETS } from "../../lib/orbData";
-import { Density, normalizeOrb, clamp } from "./OrbDisplay";
+import { useOrbFilters } from "@/features/orbs/hooks/useOrbFilters";
+import { sanitizeOrbInput } from "@/features/orbs/utils/orbInput";
+import { rarityOptions, type OrbIn } from "@/lib/types";
+import { ORB_TYPES, ORB_SETS } from "@/lib/orbData";
+import type { Density } from "./OrbDisplay";
+
+function createDefaultOrbFormState(): OrbFormState {
+  return {
+    type: ORB_TYPES[0],
+    set: ORB_SETS[0],
+    rarity: "Rare",
+    value: 0,
+    level: 0,
+    awakened: 0,
+  };
+}
+
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    target.isContentEditable
+  );
+}
 
 export default function OrbsEditor({
   orbs,
@@ -39,24 +52,12 @@ export default function OrbsEditor({
   // Density selector
   const [density, setDensity] = useState<Density>("cozy");
 
-  // Import dialog
-  const [openImport, setOpenImport] = useState(false);
-  const [jsonText, setJsonText] = useState("");
-  const [importError, setImportError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement | null>(null);
-
   // Add/Edit dialog
   const [openForm, setOpenForm] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [form, setForm] = useState<OrbFormState>(() => ({
-    type: ORB_TYPES[0],
-    set: ORB_SETS[0],
-    rarity: "Rare",
-    value: 0,
-    level: 0,
-    awakened: 0,
-  }));
+  const [form, setForm] = useState<OrbFormState>(() => createDefaultOrbFormState());
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const {
     selectedTypes,
     setSelectedTypes,
@@ -79,61 +80,17 @@ export default function OrbsEditor({
   const visibleCount = visibleOrbs.length;
   const totalCount = orbs.length;
 
-  // ---- Import handlers ----
-  async function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      setJsonText(text);
-      setImportError(null);
-    } catch (err: any) {
-      setImportError(err?.message || "Failed to read file");
-    }
-  }
-
-  function parseAndReplaceFromText() {
-    setImportError(null);
-    try {
-      const data = JSON.parse(jsonText);
-      let arr: any[] = [];
-
-      if (Array.isArray(data)) arr = data;
-      else if (data && Array.isArray(data.orbs)) arr = data.orbs;
-      else throw new Error("JSON must be an array of orbs or an object with { orbs: [...] }");
-
-      const normalized: OrbIn[] = [];
-      for (const item of arr) {
-        const o = normalizeOrb(item);
-        if (o) normalized.push(o);
-      }
-      if (normalized.length === 0) throw new Error("No valid orbs found in the JSON.");
-
-      setOrbs(normalized); // replace list
-      setOpenImport(false);
-      setJsonText("");
-      // keep current filters; they still apply to the new list
-    } catch (e: any) {
-      setImportError(e?.message || "Invalid JSON");
-    }
-  }
-
   // ---- Add/Edit handlers ----
-  function openAdd() {
+  const openAdd = useCallback(() => {
     setEditingIndex(null);
-    setForm({
-      type: ORB_TYPES[0],
-      set: ORB_SETS[0],
-      rarity: "Rare",
-      value: 0,
-      level: 0,
-      awakened: 0,
-    });
+    setForm(createDefaultOrbFormState());
     setOpenForm(true);
-  }
+  }, []);
 
-  function openEdit(index: number) {
+  const openEdit = useCallback((index: number) => {
     const o = orbs[index];
+    if (!o) return;
+
     setEditingIndex(index);
     setForm({
       type: o.type,
@@ -144,17 +101,18 @@ export default function OrbsEditor({
       awakened: Math.max(0, Math.floor(Number(o.awakened) || 0)),
     });
     setOpenForm(true);
-  }
+  }, [orbs]);
 
-  function saveForm() {
-    const cleaned: OrbIn = {
+  const saveForm = useCallback(() => {
+    const cleaned: OrbIn = sanitizeOrbInput({
       type: form.type,
       set: form.set,
       rarity: form.rarity,
-      value: clamp(Number(form.value) || 0),
-      level: clamp(Number(form.level) || 0, 0, 9),
+      value: Number(form.value) || 0,
+      level: Number(form.level) || 0,
       awakened: Math.max(0, Math.floor(Number(form.awakened) || 0)),
-    };
+    });
+
     if (editingIndex === null) {
       setOrbs([...orbs, cleaned]);
     } else {
@@ -162,8 +120,64 @@ export default function OrbsEditor({
       next[editingIndex] = cleaned;
       setOrbs(next);
     }
+
     setOpenForm(false);
-  }
+    setEditingIndex(null);
+  }, [editingIndex, form, orbs, setOrbs]);
+
+  const handleDeleteAtVisibleIndex = useCallback((visibleIndex: number) => {
+    const originalIndex = visibleOrbIndices[visibleIndex];
+    if (originalIndex === undefined) return;
+    setOrbs(orbs.filter((_, index) => index !== originalIndex));
+  }, [orbs, setOrbs, visibleOrbIndices]);
+
+  const handleEditAtVisibleIndex = useCallback((visibleIndex: number) => {
+    const originalIndex = visibleOrbIndices[visibleIndex];
+    if (originalIndex === undefined) return;
+    openEdit(originalIndex);
+  }, [openEdit, visibleOrbIndices]);
+
+  const clearOrbs = useCallback(() => {
+    if (orbs.length === 0) return;
+    const confirmed = window.confirm("Clear all orbs from the current collection?");
+    if (!confirmed) return;
+    setOrbs([]);
+  }, [orbs.length, setOrbs]);
+
+  useEffect(() => {
+    function handleGlobalShortcuts(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
+
+      if (event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        if (event.key.toLowerCase() === "a") {
+          event.preventDefault();
+          openAdd();
+          return;
+        }
+
+        if (event.key.toLowerCase() === "f") {
+          event.preventDefault();
+          setFiltersOpen((open) => !open);
+          return;
+        }
+      }
+
+      if (
+        event.key === "/" &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !isTextEntryTarget(event.target)
+      ) {
+        event.preventDefault();
+        setFiltersOpen(true);
+        searchInputRef.current?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleGlobalShortcuts);
+    return () => window.removeEventListener("keydown", handleGlobalShortcuts);
+  }, [openAdd]);
 
   return (
     <Section
@@ -183,60 +197,17 @@ export default function OrbsEditor({
             </SelectContent>
           </UiSelect>
 
-          {/* Import JSON dialog */}
-          <Dialog open={openImport} onOpenChange={setOpenImport}>
-            <DialogTrigger asChild>
-              <Button variant="outline">Import JSON</Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Import Orbs (JSON)</DialogTitle>
-                <DialogDescription>
-                  Paste JSON or upload a <code>.json</code> file. Importing will <strong>replace</strong> the current orb list.
-                </DialogDescription>
-              </DialogHeader>
+          <OrbImportDialog onImport={setOrbs} />
 
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Input
-                    ref={fileRef}
-                    type="file"
-                    accept="application/json,.json"
-                    onChange={handleFilePick}
-                  />
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      if (fileRef.current) fileRef.current.value = "";
-                      setJsonText("");
-                      setImportError(null);
-                    }}
-                  >
-                    Clear File
-                  </Button>
-                </div>
-
-                <Textarea
-                  placeholder={`[\n  { "type": "Flame", "set": "Lucifer", "rarity": "Rare", "value": 0, "level": 1, "awakened": 2 },\n  { "type": "Steel", "set": "Mammon", "rarity": "Legendary", "value": 12.5, "level": 8, "awakened": 0 }\n]`}
-                  className="min-h-[180px]"
-                  value={jsonText}
-                  onChange={(e) => setJsonText(e.target.value)}
-                />
-
-                {importError && <p className="text-sm text-red-600">{importError}</p>}
-              </div>
-
-              <DialogFooter>
-                <Button variant="secondary" onClick={() => setOpenImport(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={parseAndReplaceFromText}>Import</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Button onClick={openAdd}>Add Orb</Button>
-          <Button variant="destructive" onClick={() => setOrbs([])}>
+          <Button onClick={openAdd} title="Shortcut: Alt+A">
+            Add Orb
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={clearOrbs}
+            title="Shortcut: confirm clear"
+            aria-label="Clear all orbs"
+          >
             Clear
           </Button>
         </div>
@@ -261,7 +232,7 @@ export default function OrbsEditor({
               </span>
             )}
             {hasActiveFilters && (
-              <Button variant="ghost" size="sm" onClick={resetFilters}>
+              <Button variant="ghost" size="sm" onClick={resetFilters} aria-label="Reset all filters">
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                 Reset
               </Button>
@@ -271,6 +242,7 @@ export default function OrbsEditor({
               size="sm"
               onClick={() => setFiltersOpen((open) => !open)}
               aria-expanded={filtersOpen}
+              aria-label={filtersOpen ? "Collapse filters" : "Expand filters"}
               title={filtersOpen ? "Collapse filters" : "Expand filters"}
               className="h-7 w-7 p-0"
             >
@@ -301,6 +273,7 @@ export default function OrbsEditor({
               setLevelMax={setLevelMax}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
+              searchInputRef={searchInputRef}
             />
           </div>
         )}
@@ -332,16 +305,8 @@ export default function OrbsEditor({
         <OrbGrid
           orbs={visibleOrbs}
           density={density}
-          onTileClick={(i) => {
-            const originalIndex = visibleOrbIndices[i];
-            if (originalIndex !== undefined) openEdit(originalIndex);
-          }}
-          onTileDelete={(i) => {
-            const originalIndex = visibleOrbIndices[i];
-            if (originalIndex !== undefined) {
-              setOrbs(orbs.filter((_, idx) => idx !== originalIndex));
-            }
-          }}
+          onTileClick={handleEditAtVisibleIndex}
+          onTileDelete={handleDeleteAtVisibleIndex}
         />
       )}
 

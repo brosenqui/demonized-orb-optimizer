@@ -1,10 +1,10 @@
 import * as React from "react";
-import { Button } from "../ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-} from "../ui/popover";
+} from "@/components/ui/popover";
 import {
   Command,
   CommandInput,
@@ -12,30 +12,31 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
-} from "../ui/command";
-import { Checkbox } from "../ui/checkbox";
+} from "@/components/ui/command";
+import { Checkbox } from "@/components/ui/checkbox";
 import { CATEGORIES } from "@/lib/categoryData";
 
 type Props = {
-  value: string[];                // current shareable categories
+  value: readonly string[];                // current shareable categories
   onChange: (next: string[]) => void;
 };
 
 export default function ShareablePicker({ value, onChange }: Props) {
   const [open, setOpen] = React.useState(false);
 
-  function toggle(cat: string) {
+  const toggle = React.useCallback((cat: string) => {
     const set = new Set(value);
     if (set.has(cat)) set.delete(cat);
     else set.add(cat);
-    onChange(Array.from(set));
-  }
+    const ordered = CATEGORIES.filter((category) => set.has(category));
+    onChange(ordered);
+  }, [onChange, value]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="outline">
-          Shareable: {value.length > 0 ? value.join(", ") : "None"}
+          Shareable: {value.length > 0 ? `${value.length} selected` : "None"}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="p-0 w-64">
@@ -53,7 +54,7 @@ export default function ShareablePicker({ value, onChange }: Props) {
                     className="flex items-center justify-between"
                   >
                     <span>{cat}</span>
-                    <Checkbox checked={checked} onCheckedChange={() => toggle(cat)} />
+                    <Checkbox checked={checked} className="pointer-events-none" />
                   </CommandItem>
                 );
               })}

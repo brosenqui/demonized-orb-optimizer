@@ -1,44 +1,48 @@
 import React from "react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "../ui/select";
-import KvSelectTable from "../ui/KvSelectTable";
-import { objectiveOptions, type OptimizeProfileIn, type Rarity } from "../../lib/types";
-import { cn } from "../../lib/utils";
-import { HelpTooltip } from "../ui/helpToolTip";
+} from "@/components/ui/select";
+import KvSelectTable from "@/components/ui/KvSelectTable";
+import {
+  objectiveOptions,
+  type CategoryRarity,
+  type OptimizeProfileIn,
+} from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { HelpTooltip } from "@/components/ui/helpToolTip";
 import { CATEGORIES } from "@/lib/categoryData";
 
 // rarity styles + mapping
-const rarityBgClass: Record<Rarity, string> = {
+const rarityBgClass: Record<CategoryRarity, string> = {
   Rare: "bg-blue-100 text-blue-900",
   Epic: "bg-purple-100 text-purple-900",
   Legendary: "bg-amber-100 text-amber-900",
   Mythic: "bg-rose-100 text-rose-900",
 };
-const rarityRingClass: Record<Rarity, string> = {
+const rarityRingClass: Record<CategoryRarity, string> = {
   Rare: "ring-blue-300",
   Epic: "ring-purple-300",
   Legendary: "ring-amber-300",
   Mythic: "ring-rose-300",
 };
-const RARITIES: Rarity[] = ["Rare", "Epic", "Legendary", "Mythic"];
+const RARITIES: CategoryRarity[] = ["Rare", "Epic", "Legendary", "Mythic"];
 const CLEAR_VALUE = "__none__" as const; // sentinel for clearing
 
 type Props = {
   value: OptimizeProfileIn;
   onChange: (p: OptimizeProfileIn) => void;
   onRemove: () => void;
-  availableSets: string[];
-  availableTypes: string[];
+  availableSets: readonly string[];
+  availableTypes: readonly string[];
   // NEW: bubble category changes to parent so it can propagate if shareable
-  onSetCategory: (cat: string, rarity: Rarity | "") => void;
+  onSetCategory: (cat: string, rarity: CategoryRarity | "") => void;
 };
 
 export default function ProfileCard({
@@ -49,6 +53,7 @@ export default function ProfileCard({
   availableTypes,
   onSetCategory,
 }: Props) {
+  const idPrefix = React.useId();
   const categories = value.categories ?? {};
 
   return (
@@ -58,12 +63,12 @@ export default function ProfileCard({
         <div className="space-y-1">
           {/* group label + tooltip */}
           <div className="flex items-center gap-2">
-            <Label htmlFor={`profile-name-${value.name}`}>Profile name</Label>
+            <Label htmlFor={`${idPrefix}-profile-name`}>Profile name</Label>
             <HelpTooltip text="A descriptive name for this optimization profile." />
           </div>
 
           <Input
-            id={`profile-name-${value.name}`}
+            id={`${idPrefix}-profile-name`}
             placeholder="Profile name"
             value={value.name}
             onChange={(e) => onChange({ ...value, name: e.target.value })}
@@ -71,16 +76,16 @@ export default function ProfileCard({
         </div>
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <Label htmlFor={`profile-weight-${value.name}`}>Weight</Label>
+            <Label htmlFor={`${idPrefix}-profile-weight`}>Weight</Label>
             <HelpTooltip text="The relative importance of this profile when optimizing. Higher weight means the optimizer will prioritize this profile's objectives more." />
           </div>
           <Input
-            id={`profile-weight-${value.name}`}
+            id={`${idPrefix}-profile-weight`}
             type="number"
             step="0.1"
             value={value.weight}
             onChange={(e) =>
-              onChange({ ...value, weight: Number(e.target.value) })
+              onChange({ ...value, weight: Number(e.target.value) || 0 })
             }
           />
         </div>
@@ -117,32 +122,32 @@ export default function ProfileCard({
 
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <Label htmlFor={`profile-power-${value.name}`}>Power</Label>
+            <Label htmlFor={`${idPrefix}-profile-power`}>Power</Label>
             <HelpTooltip text="Determines how strongly this profile's objective influences orb selection. A higher power value increases the emphasis on this profile's goals during optimization." />
           </div>
           <Input
-            id={`profile-power-${value.name}`}
+            id={`${idPrefix}-profile-power`}
             type="number"
             step="0.1"
             value={value.power}
             onChange={(e) =>
-              onChange({ ...value, power: Number(e.target.value) })
+              onChange({ ...value, power: Number(e.target.value) || 0 })
             }
           />
         </div>
 
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <Label htmlFor={`profile-eps-${value.name}`}>Epsilon</Label>
+            <Label htmlFor={`${idPrefix}-profile-eps`}>Epsilon</Label>
             <HelpTooltip text="A small tolerance value that helps prevent overfitting to this profile's objectives. It allows for some flexibility in orb selection, ensuring a more balanced optimization." />
           </div>
           <Input
-            id={`profile-eps-${value.name}`}
+            id={`${idPrefix}-profile-eps`}
             type="number"
             step="0.01"
             value={value.epsilon}
             onChange={(e) =>
-              onChange({ ...value, epsilon: Number(e.target.value) })
+              onChange({ ...value, epsilon: Number(e.target.value) || 0 })
             }
           />
         </div>
@@ -153,7 +158,7 @@ export default function ProfileCard({
         <h4 className="font-medium mb-2">Categories & Rarity</h4>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {CATEGORIES.map((cat) => {
-            const rarity = (categories[cat] as Rarity | undefined) || undefined;
+            const rarity = categories[cat];
             return (
               <div
                 key={cat}
@@ -166,7 +171,7 @@ export default function ProfileCard({
                     if (val === CLEAR_VALUE) {
                       onSetCategory(cat, "");
                     } else {
-                      onSetCategory(cat, val as Rarity);
+                      onSetCategory(cat, val as CategoryRarity);
                     }
                   }}
                 >

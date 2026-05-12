@@ -12,7 +12,7 @@ import { cn } from "../../lib/utils";
 type Props = {
   value: Record<string, number>;
   onChange: (next: Record<string, number>) => void;
-  options: string[];           // available keys (sets or types)
+  options: readonly string[];           // available keys (sets or types)
   labelKey?: string;
   labelVal?: string;
   placeholderVal?: string;

@@ -1,23 +1,23 @@
-// Canonical categories for the optimizer UI
+import { categoryRarityOptions, type CategoryRarity } from "@/lib/types";
+
 export const CATEGORIES = ["Soul", "Wings", "Ego", "Beast", "Wagon", "Spirit Souls"] as const;
 
-// Category rarity choices (categories don't use Common/Magic)
-export const CATEGORY_RARITY_CHOICES = ["Rare", "Epic", "Legendary", "Mythic"] as const;
+export type CategoryName = (typeof CATEGORIES)[number];
 
-// Slots per rarity (for categories)
-export const CATEGORY_RARITY_SLOTS: Record<(typeof CATEGORY_RARITY_CHOICES)[number], number> = {
+export const CATEGORY_RARITY_CHOICES = categoryRarityOptions;
+
+export const CATEGORY_RARITY_SLOTS: Record<CategoryRarity, number> = {
   Rare: 1,
   Epic: 2,
   Legendary: 3,
   Mythic: 4,
 };
 
-// Helpers
-export function slotsForRarity(rarity: string): number {
-  return CATEGORY_RARITY_SLOTS[rarity as keyof typeof CATEGORY_RARITY_SLOTS] ?? 0;
+export function slotsForRarity(rarity: CategoryRarity): number {
+  return CATEGORY_RARITY_SLOTS[rarity];
 }
 
-export function normalizeCategoryRarity(rarity?: string): (typeof CATEGORY_RARITY_CHOICES)[number] {
-  if (!rarity || !CATEGORY_RARITY_CHOICES.includes(rarity as any)) return "Rare";
-  return rarity as any;
+export function normalizeCategoryRarity(rarity?: string): CategoryRarity {
+  if (!rarity) return "Rare";
+  return CATEGORY_RARITY_CHOICES.find((value) => value === rarity) ?? "Rare";
 }

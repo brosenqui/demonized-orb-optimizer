@@ -1,14 +1,14 @@
 // src/components/profiles/PriorityTemplatePicker.tsx
 import * as React from "react";
-import { Button } from "../ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "../ui/select";
-import type { PriorityTemplate } from "../../lib/priorityTemplates";
+} from "@/components/ui/select";
+import type { PriorityTemplate } from "@/lib/priorityTemplates";
 
 export default function PriorityTemplatePicker({
   templates,
