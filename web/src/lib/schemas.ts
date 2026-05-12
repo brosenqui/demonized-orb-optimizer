@@ -57,7 +57,9 @@ const optimizeRawProfileSchema = z
     score: z.coerce.number().nullable().optional(),
     set_score: z.coerce.number().nullable().optional(),
     orb_score: z.coerce.number().nullable().optional(),
-    used_slots: z.record(z.string(), z.coerce.number().int()).default({}),
+    requested_slots: z.coerce.number().int().optional(),
+    filled_slots: z.coerce.number().int().optional(),
+    is_partial: z.boolean().optional(),
     assignments: z.record(z.string(), z.array(orbInSchema).default([])).default({}),
   })
   .transform((profile) => ({
@@ -65,39 +67,60 @@ const optimizeRawProfileSchema = z
     score: profile.score ?? null,
     set_score: profile.set_score ?? null,
     orb_score: profile.orb_score ?? null,
+    requested_slots: profile.requested_slots ?? 0,
+    filled_slots: profile.filled_slots ?? 0,
+    is_partial: profile.is_partial ?? false,
   }));
 
 export const optimizeRawPayloadSchema = z
   .object({
     combined_score: z.coerce.number().nullable().optional(),
+    requested_slots: z.coerce.number().int().optional(),
+    filled_slots: z.coerce.number().int().optional(),
+    is_partial: z.boolean().optional(),
     profiles: z.array(optimizeRawProfileSchema).default([]),
   })
   .transform((payload) => ({
     ...payload,
     combined_score: payload.combined_score ?? null,
+    requested_slots: payload.requested_slots ?? 0,
+    filled_slots: payload.filled_slots ?? 0,
+    is_partial: payload.is_partial ?? false,
   }));
 
 export const optimizeSummarySchema = z
   .object({
     combined_score: z.coerce.number().nullable().optional(),
-    per_profile: z
+    requested_slots: z.coerce.number().int().optional(),
+    filled_slots: z.coerce.number().int().optional(),
+    is_partial: z.boolean().optional(),
+    profiles: z
       .array(
         z.object({
           name: z.string(),
           score: z.coerce.number().nullable().optional(),
           set_score: z.coerce.number().nullable().optional(),
           orb_score: z.coerce.number().nullable().optional(),
+          requested_slots: z.coerce.number().int().optional(),
+          filled_slots: z.coerce.number().int().optional(),
+          is_partial: z.boolean().optional(),
         })
       )
       .default([]),
   })
   .transform((summary) => ({
     combined_score: summary.combined_score ?? null,
-    per_profile: summary.per_profile.map((profile) => ({
+    requested_slots: summary.requested_slots ?? 0,
+    filled_slots: summary.filled_slots ?? 0,
+    is_partial: summary.is_partial ?? false,
+    profiles: summary.profiles.map((profile) => ({
       ...profile,
       score: profile.score ?? null,
       set_score: profile.set_score ?? null,
       orb_score: profile.orb_score ?? null,
+      requested_slots: profile.requested_slots ?? 0,
+      filled_slots: profile.filled_slots ?? 0,
+      is_partial: profile.is_partial ?? false,
     })),
   }));
 

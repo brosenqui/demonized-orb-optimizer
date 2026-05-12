@@ -42,19 +42,35 @@ describe("schemas", () => {
       result: {
         summary: {
           combined_score: 12,
-          per_profile: [
-            { name: "Main", score: 12, set_score: 8, orb_score: 4 },
-          ],
-        },
-        raw: {
-          combined_score: 12,
+          requested_slots: 4,
+          filled_slots: 3,
+          is_partial: true,
           profiles: [
             {
               name: "Main",
               score: 12,
               set_score: 8,
               orb_score: 4,
-              used_slots: { Soul: 1 },
+              requested_slots: 4,
+              filled_slots: 3,
+              is_partial: true,
+            },
+          ],
+        },
+        raw: {
+          combined_score: 12,
+          requested_slots: 4,
+          filled_slots: 3,
+          is_partial: true,
+          profiles: [
+            {
+              name: "Main",
+              score: 12,
+              set_score: 8,
+              orb_score: 4,
+              requested_slots: 4,
+              filled_slots: 3,
+              is_partial: true,
               assignments: {
                 Soul: [
                   {

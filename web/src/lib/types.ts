@@ -54,12 +54,17 @@ export type OptimizeRawProfile = {
   score: number | null;
   set_score: number | null;
   orb_score: number | null;
-  used_slots: Record<string, number>;
+  requested_slots: number;
+  filled_slots: number;
+  is_partial: boolean;
   assignments: Record<string, OrbIn[]>;
 };
 
 export type OptimizeRawPayload = {
   combined_score: number | null;
+  requested_slots: number;
+  filled_slots: number;
+  is_partial: boolean;
   profiles: OptimizeRawProfile[];
 };
 
@@ -68,11 +73,17 @@ export type OptimizeSummaryProfile = {
   score: number | null;
   set_score: number | null;
   orb_score: number | null;
+  requested_slots: number;
+  filled_slots: number;
+  is_partial: boolean;
 };
 
 export type OptimizeSummary = {
   combined_score: number | null;
-  per_profile: OptimizeSummaryProfile[];
+  requested_slots: number;
+  filled_slots: number;
+  is_partial: boolean;
+  profiles: OptimizeSummaryProfile[];
 };
 
 export type OptimizeResult = {

@@ -27,10 +27,16 @@ class ProfileRaw(BaseModel):
     score: Optional[float] = None
     set_score: Optional[float] = None
     orb_score: Optional[float] = None
+    requested_slots: int = 0
+    filled_slots: int = 0
+    is_partial: bool = False
     assignments: Dict[str, List[OrbOut]] = Field(default_factory=dict)
 
 class RawPayload(BaseModel):
     combined_score: Optional[float] = None
+    requested_slots: int = 0
+    filled_slots: int = 0
+    is_partial: bool = False
     profiles: List[ProfileRaw] = Field(default_factory=list)
 
 class SummaryProfile(BaseModel):
@@ -38,9 +44,15 @@ class SummaryProfile(BaseModel):
     score: Optional[float] = None
     set_score: Optional[float] = None
     orb_score: Optional[float] = None
+    requested_slots: int = 0
+    filled_slots: int = 0
+    is_partial: bool = False
 
 class SummaryPayload(BaseModel):
     combined_score: Optional[float] = None
+    requested_slots: int = 0
+    filled_slots: int = 0
+    is_partial: bool = False
     profiles: List[SummaryProfile] = Field(default_factory=list)
 
 class OptimizeProfileIn(BaseModel):

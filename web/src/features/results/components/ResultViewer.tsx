@@ -20,7 +20,7 @@ function SummaryChip({ label, value }: { label: string; value: number | null | u
 }
 
 function resolveSummaryProfiles(data: OptimizeResponse): OptimizeSummaryProfile[] {
-  return data.result.summary.per_profile;
+  return data.result.summary.profiles;
 }
 
 function summaryByName(
@@ -79,6 +79,13 @@ export default function ResultViewer({ data, loading, error }: ResultViewerProps
           Combined Score: <span className="font-mono">{rounded(parsed.combined_score)}</span>
         </div>
       )}
+      <div className="mb-3 text-sm text-zinc-600">
+        Coverage:{" "}
+        <span className="font-mono">
+          {parsed.filled_slots}/{parsed.requested_slots}
+        </span>
+        {parsed.is_partial ? " (partial)" : " (complete)"}
+      </div>
 
       <div className="space-y-8">
         {parsed.profiles.map((profile, index) => {
@@ -92,6 +99,10 @@ export default function ResultViewer({ data, loading, error }: ResultViewerProps
                   <SummaryChip label="Sets" value={summary?.set_score ?? profile.set_score} />
                   <SummaryChip label="Orbs" value={summary?.orb_score ?? profile.orb_score} />
                 </div>
+              </div>
+              <div className="text-xs text-zinc-500">
+                Coverage: {profile.filled_slots}/{profile.requested_slots}
+                {profile.is_partial ? " (partial)" : " (complete)"}
               </div>
               <ProfileResults assignments={profile.assignments} />
             </div>

@@ -50,6 +50,11 @@ def _as_non_negative_int(value: Any) -> int:
 
 def _profile_categories_from(req_profile: OptimizeProfileIn) -> List[Category]:
     """Build Category list for a single OptimizeProfileIn request object."""
+    if req_profile.slots:
+        return [
+            Category(name=str(k), slots=max(0, int(v)))
+            for k, v in req_profile.slots.items()
+        ]
     # rarity -> implied slot counts
     if req_profile.categories:
         return [
@@ -59,16 +64,29 @@ def _profile_categories_from(req_profile: OptimizeProfileIn) -> List[Category]:
     return []
 
 
-def _summarize_result_multi(normalized_profiles: List[Dict[str, Any]], combined_score: float | None) -> Dict[str, Any]:
+def _summarize_result_multi(
+    normalized_profiles: List[Dict[str, Any]],
+    combined_score: float | None,
+    *,
+    requested_slots: int,
+    filled_slots: int,
+    is_partial: bool,
+) -> Dict[str, Any]:
     """Compact UI summary derived from already-normalized profiles."""
     return {
         "combined_score": combined_score,
-        "per_profile": [
+        "requested_slots": requested_slots,
+        "filled_slots": filled_slots,
+        "is_partial": is_partial,
+        "profiles": [
             {
                 "name": p["name"],
                 "score": (p.get("set_score") or 0.0) + (p.get("orb_score") or 0.0),
                 "set_score": p.get("set_score"),
                 "orb_score": p.get("orb_score"),
+                "requested_slots": p.get("requested_slots", 0),
+                "filled_slots": p.get("filled_slots", 0),
+                "is_partial": p.get("is_partial", False),
             }
             for p in normalized_profiles
         ],
@@ -87,17 +105,25 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
         "result": {
           "summary": {
             "combined_score": number|null,
+            "requested_slots": int,
+            "filled_slots": int,
+            "is_partial": bool,
             "profiles": [{ name, score?, set_score?, orb_score? }, ...]
           },
           "raw": {
             "combined_score": number|null,
+            "requested_slots": int,
+            "filled_slots": int,
+            "is_partial": bool,
             "profiles": [
               {
                 "name": str,
                 "score": number|null,
                 "set_score": number|null,
                 "orb_score": number|null,
-                "used_slots": { [category]: int },
+                "requested_slots": int,
+                "filled_slots": int,
+                "is_partial": bool,
                 "assignments": { [category]: [ {type,set,rarity,value,level,awakened,slot_index?}, ... ] }
               },
               ...
@@ -145,7 +171,15 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     # ---- Solve (greedy unified) ----
     try:
         logger.info("Running unified greedy")
-        solver = GreedyOptimizer(inputs=inputs, logger=logger)
+        solver = GreedyOptimizer(
+            inputs=inputs,
+            logger=logger,
+            topk_per_type=16,
+            restarts=6,
+            seed=0,
+            max_time_ms=1500,
+            enable_debug_breakdown=False,
+        )
         # Expect the solver to return an object with:
         #   result.combined_score: float
         #   result.profiles: dict[name] -> object with set_score, orb_score, loadout: {cat: [Orb,...]}
@@ -157,6 +191,9 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     # ---- Canonicalize response shape (profiles as array; use assignments key) ----
     combined = getattr(result, "combined_score", None)
     combined_round = round(float(combined), 6) if isinstance(combined, (int, float)) else None
+    requested_slots = int(getattr(result, "requested_slots", 0) or 0)
+    filled_slots = int(getattr(result, "filled_slots", 0) or 0)
+    is_partial = bool(getattr(result, "is_partial", False))
 
     normalized_profiles: List[Dict[str, Any]] = []
     # result.profiles expected as dict[name] -> data
@@ -185,14 +222,13 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
                 )
             assignments[str(cat)] = normalized_items
 
-        # used_slots = echo profile config categories
-        prof_cfg = next((p for p in profiles if p.name == name), None)
-        used_slots = {c.name: int(c.slots) for c in (prof_cfg.categories if prof_cfg else [])}
-
         # Scores
         set_s = getattr(pr, "set_score", None)
         orb_s = getattr(pr, "orb_score", None)
         total = (set_s if isinstance(set_s, (int, float)) else 0.0) + (orb_s if isinstance(orb_s, (int, float)) else 0.0)
+        req_slots = int(getattr(pr, "requested_slots", 0) or 0)
+        fill_slots = int(getattr(pr, "filled_slots", 0) or 0)
+        partial = bool(getattr(pr, "is_partial", fill_slots < req_slots))
 
         normalized_profiles.append(
             {
@@ -200,12 +236,20 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
                 "score": round(total, 6),
                 "set_score": (round(float(set_s), 6) if isinstance(set_s, (int, float)) else None),
                 "orb_score": (round(float(orb_s), 6) if isinstance(orb_s, (int, float)) else None),
-                "used_slots": used_slots,
+                "requested_slots": req_slots,
+                "filled_slots": fill_slots,
+                "is_partial": partial,
                 "assignments": assignments,
             }
         )
 
-    summary = _summarize_result_multi(normalized_profiles, combined_round)
+    summary = _summarize_result_multi(
+        normalized_profiles,
+        combined_round,
+        requested_slots=requested_slots,
+        filled_slots=filled_slots,
+        is_partial=is_partial,
+    )
     logger.info("Optimization complete")
 
     # ---- Build final response ----
@@ -215,6 +259,9 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
             summary=summary,
             raw={
                 "combined_score": combined_round,
+                "requested_slots": requested_slots,
+                "filled_slots": filled_slots,
+                "is_partial": is_partial,
                 "profiles": normalized_profiles,  # <-- ARRAY, not dict
             },
         ),
