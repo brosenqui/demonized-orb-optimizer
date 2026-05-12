@@ -1,4 +1,4 @@
-import type { OptimizeRawPayload, OrbIn } from "./types";
+import type { OptimizeRawPayload, OrbIn, SharedSummary } from "./types";
 
 export type ParsedProfile = {
   name: string;
@@ -16,6 +16,7 @@ export type ParsedResult = {
   requested_slots: number;
   filled_slots: number;
   is_partial: boolean;
+  shared_summary: SharedSummary | null;
   profiles: ParsedProfile[];
 };
 
@@ -27,6 +28,7 @@ export function parseResultsFromRaw(raw: OptimizeRawPayload | null | undefined):
     requested_slots: raw.requested_slots ?? 0,
     filled_slots: raw.filled_slots ?? 0,
     is_partial: raw.is_partial ?? false,
+    shared_summary: raw.shared_summary ?? null,
     profiles: raw.profiles.map((profile) => ({
       name: profile.name,
       score: profile.score ?? null,

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..defaults import DEFAULT_SET_COUNTS
 from ..models import AssignedOrb, MultiProfileResult, Orb, ProfileConfig, ProfileResult
+from ..shared_summary import build_shared_summary
 
 # Heuristic defaults
 TOPK_DEFAULT = 16
@@ -411,12 +412,28 @@ class GreedyOptimizer:
                 is_partial=is_partial,
             )
 
+        def coeff_tuple(profile: ProfileConfig) -> tuple[float, float]:
+            epsilon = float(getattr(profile, "epsilon", 0.0) or 0.0)
+            if getattr(profile, "objective", "sets-first") == "types-first":
+                return epsilon, 1.0
+            return 1.0, epsilon
+
         return MultiProfileResult(
             profiles=per_profile,
             combined_score=combined_primary,
             requested_slots=total_requested,
             filled_slots=total_filled,
             is_partial=total_filled < total_requested,
+            shared_summary=build_shared_summary(
+                profiles=self.profiles,
+                assignments=assign,
+                slots_by_profile=self._slots,
+                shareable_categories=self.shareable,
+                candidate_orbs=self.orbs,
+                marginal_gain_fn=self._marginal_gain,
+                primary_coeff_fn=coeff_tuple,
+                set_cap_fn=self._set_cap,
+            ),
         )
 
     # ---------------- Marginal Gain ----------------

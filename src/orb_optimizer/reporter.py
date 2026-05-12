@@ -42,6 +42,7 @@ class ReportOptions:
     base_result: Optional[Dict[str, Any]] = None  # same shape as 'result'
     show_active_sets: bool = True
     show_orb_type_summary: bool = True
+    show_shared_summary: bool = True
     # Limit the amount of output for large datasets
     max_sets_to_show: int = 999999
     max_categories_to_show: int = 999999
@@ -83,6 +84,9 @@ class OptimizationReporter:
         if opts.show_refine and opts.base_result is not None:
             self._emit_refine_summary(opts.base_result, result, passes=opts.refine_passes)
 
+        if opts.show_shared_summary and getattr(result, "shared_summary", None):
+            self._emit_shared_summary(result.shared_summary)
+
         # Per-profile sections
         for p in profiles:
             pdata = result.profiles[p.name]
@@ -116,6 +120,46 @@ class OptimizationReporter:
 
             if opts.show_orb_type_summary:
                 self._emit_orb_type_summary(loadout)
+
+    def _emit_shared_summary(self, shared_summary: Any) -> None:
+        self._print_header("Shared Slot Summary", color="yellow", bold=True)
+        self._print_kv(
+            "• Coverage",
+            f"{shared_summary.filled_slots}/{shared_summary.requested_slots} "
+            f"({'partial' if shared_summary.is_partial else 'complete'})",
+        )
+        self._print_kv(
+            "• Profile coverage",
+            f"{shared_summary.filled_positions}/{shared_summary.requested_positions}",
+        )
+        self._print_kv("• Compromise loss", f"{float(shared_summary.compromise_loss_total):.4f}")
+
+        if getattr(shared_summary, "cap_limited_slots_by_profile", None):
+            cap_text = ", ".join(
+                f"{p}={n}" for p, n in sorted(shared_summary.cap_limited_slots_by_profile.items())
+            )
+            if cap_text:
+                self._print_kv("• Cap-limited slots", cap_text)
+
+        self._println("")
+
+        active_sets = getattr(shared_summary, "active_sets", {}) or {}
+        self._print_header("Shared Active Sets:", color="yellow")
+        if not active_sets:
+            self._println("  • (none)")
+        else:
+            for set_name, count in active_sets.items():
+                self._println(f"  • {set_name}: {count}")
+        self._println("")
+
+        totals_by_type = getattr(shared_summary, "totals_by_type", {}) or {}
+        self._print_header("Shared Totals by Type:", color="yellow")
+        if not totals_by_type:
+            self._println("  • (none)")
+        else:
+            for orb_type, total in totals_by_type.items():
+                self._println(f"  • {orb_type}: {float(total):.4f}")
+        self._println("")
 
     # ---- sections ----
     def _emit_refine_summary(self, base: Any, refined: MultiProfileResult, *, passes: int) -> None:

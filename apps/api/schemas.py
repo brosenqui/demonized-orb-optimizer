@@ -22,6 +22,39 @@ class OrbOut(BaseModel):
     awakened: int = 0
     slot_index: Optional[int] = None  # allowed but optional
 
+class SharedSlotProfileImpactOut(BaseModel):
+    profile: str
+    selected_score: float = 0.0
+    solo_best_score: float = 0.0
+    compromise_loss: float = 0.0
+    selected_d_set: float = 0.0
+    selected_d_orb: float = 0.0
+    solo_best_d_set: float = 0.0
+    solo_best_d_orb: float = 0.0
+    cap_limited: bool = False
+
+class SharedSlotAssignmentOut(BaseModel):
+    category: str
+    slot_index: int
+    profiles: List[str] = Field(default_factory=list)
+    is_uniform: bool = False
+    orb: Optional[OrbOut] = None
+    profile_orbs: Dict[str, Optional[OrbOut]] = Field(default_factory=dict)
+    profile_impacts: List[SharedSlotProfileImpactOut] = Field(default_factory=list)
+
+class SharedSummaryOut(BaseModel):
+    requested_slots: int = 0
+    filled_slots: int = 0
+    is_partial: bool = False
+    requested_positions: int = 0
+    filled_positions: int = 0
+    active_sets: Dict[str, int] = Field(default_factory=dict)
+    totals_by_type: Dict[str, float] = Field(default_factory=dict)
+    compromise_loss_total: float = 0.0
+    compromise_loss_by_profile: Dict[str, float] = Field(default_factory=dict)
+    cap_limited_slots_by_profile: Dict[str, int] = Field(default_factory=dict)
+    slots: List[SharedSlotAssignmentOut] = Field(default_factory=list)
+
 class ProfileRaw(BaseModel):
     name: str
     score: Optional[float] = None
@@ -37,6 +70,7 @@ class RawPayload(BaseModel):
     requested_slots: int = 0
     filled_slots: int = 0
     is_partial: bool = False
+    shared_summary: Optional[SharedSummaryOut] = None
     profiles: List[ProfileRaw] = Field(default_factory=list)
 
 class SummaryProfile(BaseModel):
@@ -53,6 +87,7 @@ class SummaryPayload(BaseModel):
     requested_slots: int = 0
     filled_slots: int = 0
     is_partial: bool = False
+    shared_summary: Optional[SharedSummaryOut] = None
     profiles: List[SummaryProfile] = Field(default_factory=list)
 
 class OptimizeProfileIn(BaseModel):

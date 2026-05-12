@@ -11,6 +11,19 @@ const SUCCESS_RESPONSE: OptimizeResponse = {
       requested_slots: 4,
       filled_slots: 3,
       is_partial: true,
+      shared_summary: {
+        requested_slots: 1,
+        filled_slots: 1,
+        is_partial: false,
+        requested_positions: 1,
+        filled_positions: 1,
+        active_sets: { Lucifer: 1 },
+        totals_by_type: { Flame: 10 },
+        compromise_loss_total: 0,
+        compromise_loss_by_profile: { Main: 0 },
+        cap_limited_slots_by_profile: {},
+        slots: [],
+      },
       profiles: [
         {
           name: "Main",
@@ -28,6 +41,19 @@ const SUCCESS_RESPONSE: OptimizeResponse = {
       requested_slots: 4,
       filled_slots: 3,
       is_partial: true,
+      shared_summary: {
+        requested_slots: 1,
+        filled_slots: 1,
+        is_partial: false,
+        requested_positions: 1,
+        filled_positions: 1,
+        active_sets: { Lucifer: 1 },
+        totals_by_type: { Flame: 10 },
+        compromise_loss_total: 0,
+        compromise_loss_by_profile: { Main: 0 },
+        cap_limited_slots_by_profile: {},
+        slots: [],
+      },
       profiles: [
         {
           name: "Main",
@@ -75,5 +101,7 @@ describe("ResultViewer", () => {
     render(<ResultViewer data={SUCCESS_RESPONSE} loading={false} error={null} />);
     expect(screen.getByText("Profile: Main")).toBeInTheDocument();
     expect(screen.getByText("Combined Score:")).toBeInTheDocument();
+    expect(screen.getByText("Shared Slot Summary")).toBeInTheDocument();
+    expect(screen.getByText("Advanced shared diagnostics")).toBeInTheDocument();
   });
 });

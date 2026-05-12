@@ -45,6 +45,19 @@ describe("schemas", () => {
           requested_slots: 4,
           filled_slots: 3,
           is_partial: true,
+          shared_summary: {
+            requested_slots: 2,
+            filled_slots: 1,
+            is_partial: true,
+            requested_positions: 2,
+            filled_positions: 1,
+            active_sets: { Lucifer: 1 },
+            totals_by_type: { Flame: 12 },
+            compromise_loss_total: 0.5,
+            compromise_loss_by_profile: { Main: 0.5 },
+            cap_limited_slots_by_profile: { Main: 1 },
+            slots: [],
+          },
           profiles: [
             {
               name: "Main",
@@ -62,6 +75,19 @@ describe("schemas", () => {
           requested_slots: 4,
           filled_slots: 3,
           is_partial: true,
+          shared_summary: {
+            requested_slots: 2,
+            filled_slots: 1,
+            is_partial: true,
+            requested_positions: 2,
+            filled_positions: 1,
+            active_sets: { Lucifer: 1 },
+            totals_by_type: { Flame: 12 },
+            compromise_loss_total: 0.5,
+            compromise_loss_by_profile: { Main: 0.5 },
+            cap_limited_slots_by_profile: { Main: 1 },
+            slots: [],
+          },
           profiles: [
             {
               name: "Main",
@@ -91,6 +117,7 @@ describe("schemas", () => {
 
     expect(response.ok).toBe(true);
     expect(response.result.raw.profiles[0].assignments.Soul).toHaveLength(1);
+    expect(response.result.raw.shared_summary?.compromise_loss_total).toBe(0.5);
   });
 
   it("fails invalid response shapes", () => {

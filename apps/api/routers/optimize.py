@@ -11,6 +11,7 @@ from orb_optimizer.io.loader import Loader
 from orb_optimizer.io.sources import DictSource
 from orb_optimizer.models import Inputs, ProfileConfig, Category
 from orb_optimizer.solvers.greedy import GreedyOptimizer
+from orb_optimizer.shared_summary import shared_summary_to_dict
 
 router = APIRouter()
 
@@ -71,6 +72,7 @@ def _summarize_result_multi(
     requested_slots: int,
     filled_slots: int,
     is_partial: bool,
+    shared_summary: Dict[str, Any] | None,
 ) -> Dict[str, Any]:
     """Compact UI summary derived from already-normalized profiles."""
     return {
@@ -78,6 +80,7 @@ def _summarize_result_multi(
         "requested_slots": requested_slots,
         "filled_slots": filled_slots,
         "is_partial": is_partial,
+        "shared_summary": shared_summary,
         "profiles": [
             {
                 "name": p["name"],
@@ -194,6 +197,7 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     requested_slots = int(getattr(result, "requested_slots", 0) or 0)
     filled_slots = int(getattr(result, "filled_slots", 0) or 0)
     is_partial = bool(getattr(result, "is_partial", False))
+    shared_summary = shared_summary_to_dict(getattr(result, "shared_summary", None))
 
     normalized_profiles: List[Dict[str, Any]] = []
     # result.profiles expected as dict[name] -> data
@@ -249,6 +253,7 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
         requested_slots=requested_slots,
         filled_slots=filled_slots,
         is_partial=is_partial,
+        shared_summary=shared_summary,
     )
     logger.info("Optimization complete")
 
@@ -262,6 +267,7 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
                 "requested_slots": requested_slots,
                 "filled_slots": filled_slots,
                 "is_partial": is_partial,
+                "shared_summary": shared_summary,
                 "profiles": normalized_profiles,  # <-- ARRAY, not dict
             },
         ),

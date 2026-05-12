@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Tuple, Optional
 
 from ..models import Orb, Category, ProfileConfig, ProfileResult, MultiProfileResult
 from ..defaults import DEFAULT_SET_COUNTS
+from ..shared_summary import build_shared_summary
 
 SET_MAX_COUNTS: dict[str, int] = {
     set_name: max(thresholds)
@@ -328,6 +329,25 @@ class UnifiedOptimizer:
                     return False
         return True
 
+    def _set_cap(self, set_name: str) -> Optional[int]:
+        return SET_MAX_COUNTS.get(set_name)
+
+    def _marginal_gain(self, prof: ProfileConfig, orb: Orb, set_count: Counter) -> Tuple[float, float]:
+        set_name = getattr(orb, "set", None) or ""
+        c_before = set_count[set_name]
+        c_after = c_before + 1
+        thresholds = DEFAULT_SET_COUNTS.get(set_name, [])
+        tiers_before = sum(1 for t in thresholds if c_before >= t)
+        tiers_after = sum(1 for t in thresholds if c_after >= t)
+        weight = prof.set_priority.get(set_name, 0.0)
+        power = float(getattr(prof, "power", 1.0))
+        d_set = weight * ((tiers_after ** power) - (tiers_before ** power))
+
+        key = orb_key(orb)
+        d_orb = self._orb_base_scores[key] * prof.orb_type_weights.get(orb.type, 1.0)
+        d_orb += self._orb_level_scores[key] * prof.orb_level_weights.get(orb.type, 0.0)
+        return d_set, d_orb
+
     # --------------------------- optimization ---------------------------
 
     def optimize(self, beam_width: int = 200) -> MultiProfileResult:
@@ -545,6 +565,19 @@ class UnifiedOptimizer:
             requested_slots=total_requested,
             filled_slots=total_filled,
             is_partial=total_filled < total_requested,
+            shared_summary=build_shared_summary(
+                profiles=self.P.profiles,
+                assignments=best_state["assign"],
+                slots_by_profile=self._slots_by_profile,
+                shareable_categories=self.shareable,
+                candidate_orbs=self.P.orbs,
+                marginal_gain_fn=self._marginal_gain,
+                primary_coeff_fn=lambda profile: (
+                    1.0 if profile.objective == "sets-first" else float(getattr(profile, "epsilon", 0.0) or 0.0),
+                    float(getattr(profile, "epsilon", 0.0) or 0.0) if profile.objective == "sets-first" else 1.0,
+                ),
+                set_cap_fn=self._set_cap,
+            ),
         )
 
     # --------------------------- expansion helper ---------------------------

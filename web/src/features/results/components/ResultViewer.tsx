@@ -29,6 +29,10 @@ function summaryByName(
   return Object.fromEntries(summaryProfiles.map((profile) => [profile.name, profile]));
 }
 
+function sortedNumericEntries(values: Record<string, number>): Array<[string, number]> {
+  return Object.entries(values).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+}
+
 type ResultViewerProps = {
   data: OptimizeResponse | null;
   loading: boolean;
@@ -86,6 +90,69 @@ export default function ResultViewer({ data, loading, error }: ResultViewerProps
         </span>
         {parsed.is_partial ? " (partial)" : " (complete)"}
       </div>
+
+      {parsed.shared_summary && (
+        <div className="mb-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 space-y-3">
+          <h3 className="text-base font-semibold">Shared Slot Summary</h3>
+          <div className="text-xs text-zinc-600">
+            Coverage: {parsed.shared_summary.filled_slots}/{parsed.shared_summary.requested_slots}
+            {parsed.shared_summary.is_partial ? " (partial)" : " (complete)"}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-sm font-medium">Shared Active Sets</div>
+              {sortedNumericEntries(parsed.shared_summary.active_sets).length === 0 ? (
+                <p className="text-xs text-zinc-500">None</p>
+              ) : (
+                <ul className="space-y-1 text-xs text-zinc-700">
+                  {sortedNumericEntries(parsed.shared_summary.active_sets).map(([setName, count]) => (
+                    <li key={setName}>
+                      {setName}: <span className="font-mono">{count}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <div className="mb-1 text-sm font-medium">Shared Totals by Type</div>
+              {sortedNumericEntries(parsed.shared_summary.totals_by_type).length === 0 ? (
+                <p className="text-xs text-zinc-500">None</p>
+              ) : (
+                <ul className="space-y-1 text-xs text-zinc-700">
+                  {sortedNumericEntries(parsed.shared_summary.totals_by_type).map(([type, total]) => (
+                    <li key={type}>
+                      {type}: <span className="font-mono">{rounded(total)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+          <details className="rounded-xl border border-zinc-200 bg-white p-3">
+            <summary className="cursor-pointer select-none text-sm font-medium text-zinc-700">
+              Advanced shared diagnostics
+            </summary>
+            <div className="mt-3 space-y-2 text-xs text-zinc-600">
+              <div>
+                Profile Coverage: {parsed.shared_summary.filled_positions}/
+                {parsed.shared_summary.requested_positions}
+              </div>
+              <div>
+                Compromise Loss:{" "}
+                <span className="font-mono">{rounded(parsed.shared_summary.compromise_loss_total)}</span>
+              </div>
+              {Object.keys(parsed.shared_summary.cap_limited_slots_by_profile).length > 0 && (
+                <div>
+                  Cap-limited Slots:{" "}
+                  {Object.entries(parsed.shared_summary.cap_limited_slots_by_profile)
+                    .map(([name, count]) => `${name}=${count}`)
+                    .join(", ")}
+                </div>
+              )}
+            </div>
+          </details>
+        </div>
+      )}
 
       <div className="space-y-8">
         {parsed.profiles.map((profile, index) => {

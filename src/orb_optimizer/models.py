@@ -156,6 +156,42 @@ class AssignedOrb:
     slot_index: Optional[int] = None  # for display/debug
 
 @dataclass
+class SharedSlotProfileImpact:
+    profile: str
+    selected_score: float
+    solo_best_score: float
+    compromise_loss: float
+    selected_d_set: float
+    selected_d_orb: float
+    solo_best_d_set: float
+    solo_best_d_orb: float
+    cap_limited: bool = False
+
+@dataclass
+class SharedSlotAssignment:
+    category: str
+    slot_index: int
+    profiles: List[str]
+    is_uniform: bool
+    orb: Optional[AssignedOrb] = None
+    profile_orbs: Dict[str, Optional[AssignedOrb]] = field(default_factory=dict)
+    profile_impacts: List[SharedSlotProfileImpact] = field(default_factory=list)
+
+@dataclass
+class SharedSummary:
+    requested_slots: int = 0
+    filled_slots: int = 0
+    is_partial: bool = False
+    requested_positions: int = 0
+    filled_positions: int = 0
+    active_sets: Dict[str, int] = field(default_factory=dict)
+    totals_by_type: Dict[str, float] = field(default_factory=dict)
+    compromise_loss_total: float = 0.0
+    compromise_loss_by_profile: Dict[str, float] = field(default_factory=dict)
+    cap_limited_slots_by_profile: Dict[str, int] = field(default_factory=dict)
+    slots: List[SharedSlotAssignment] = field(default_factory=list)
+
+@dataclass
 class ProfileResult:
     name: str
     set_score: float
@@ -173,3 +209,4 @@ class MultiProfileResult:
     requested_slots: int = 0
     filled_slots: int = 0
     is_partial: bool = False
+    shared_summary: Optional[SharedSummary] = None

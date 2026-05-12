@@ -108,6 +108,13 @@ def test_greedy_shared_slots_respect_per_profile_set_cap() -> None:
         assert lucifer_count <= 5
         assert profile.is_partial is True
 
+    assert result.shared_summary is not None
+    assert result.shared_summary.requested_slots == 6
+    assert result.shared_summary.filled_slots <= 5
+    assert result.shared_summary.requested_positions == 12
+    assert result.shared_summary.filled_positions <= 10
+    assert set(result.shared_summary.compromise_loss_by_profile.keys()) == {"P1", "P2"}
+
 
 def test_greedy_restarts_are_non_regressive() -> None:
     logger = _NullLogger()
@@ -161,3 +168,24 @@ def test_beam_enforces_set_cap_and_returns_partial() -> None:
     assert profile.filled_slots <= 5
     assert profile.is_partial is True
     assert result.is_partial is True
+
+
+def test_beam_populates_shared_summary() -> None:
+    inputs = Inputs(
+        orbs=_make_lucifer_orbs(6),
+        profiles=[_make_profile("P1", slots=6), _make_profile("P2", slots=6)],
+        shareable_categories=["Soul"],
+    )
+    result = UnifiedOptimizer(
+        logger=_NullLogger(),
+        inputs=inputs,
+        topk_per_category=20,
+        parallelism="serial",
+        max_time_ms=5000,
+    ).optimize(beam_width=100)
+
+    assert result.shared_summary is not None
+    assert result.shared_summary.requested_slots == 6
+    assert result.shared_summary.requested_positions == 12
+    assert result.shared_summary.filled_positions <= 12
+    assert set(result.shared_summary.compromise_loss_by_profile.keys()) == {"P1", "P2"}
