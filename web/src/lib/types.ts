@@ -54,8 +54,6 @@ export type OptimizeRawProfile = {
   score: number | null;
   set_score: number | null;
   orb_score: number | null;
-  requested_slots: number;
-  filled_slots: number;
   is_partial: boolean;
   assignments: Record<string, OrbIn[]>;
 };
@@ -83,11 +81,6 @@ export type SharedSlotAssignment = {
 };
 
 export type SharedSummary = {
-  requested_slots: number;
-  filled_slots: number;
-  is_partial: boolean;
-  requested_positions: number;
-  filled_positions: number;
   active_sets: Record<string, number>;
   totals_by_type: Record<string, number>;
   compromise_loss_total: number;
@@ -98,8 +91,6 @@ export type SharedSummary = {
 
 export type OptimizeRawPayload = {
   combined_score: number | null;
-  requested_slots: number;
-  filled_slots: number;
   is_partial: boolean;
   shared_summary: SharedSummary | null;
   run_diagnostics: Record<string, unknown> | null;
@@ -111,15 +102,11 @@ export type OptimizeSummaryProfile = {
   score: number | null;
   set_score: number | null;
   orb_score: number | null;
-  requested_slots: number;
-  filled_slots: number;
   is_partial: boolean;
 };
 
 export type OptimizeSummary = {
   combined_score: number | null;
-  requested_slots: number;
-  filled_slots: number;
   is_partial: boolean;
   shared_summary: SharedSummary | null;
   run_diagnostics: Record<string, unknown> | null;

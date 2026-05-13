@@ -249,13 +249,14 @@ class OptimizationReporter:
     def _active_sets_table(self, loadout: Dict[str, List[AssignedOrb]], prof: ProfileConfig) -> List[Dict[str, Any]]:
         counts = Counter(o.set for group in loadout.values() for o in group)
         rows: List[Dict[str, Any]] = []
+        power = float(getattr(prof, "power", 1.0))
         for sname, c in counts.items():
             th = DEFAULT_SET_COUNTS.get(sname, [])
             tiers = sum(1 for t in th if c >= t)
             if tiers <= 0:
                 continue
             w = prof.set_priority.get(sname, 0.0)
-            contrib = w * tiers
+            contrib = w * (tiers ** power)
             rows.append(
                 {
                     "set": sname,

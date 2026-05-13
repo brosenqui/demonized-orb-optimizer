@@ -43,11 +43,6 @@ class SharedSlotAssignmentOut(BaseModel):
     profile_impacts: List[SharedSlotProfileImpactOut] = Field(default_factory=list)
 
 class SharedSummaryOut(BaseModel):
-    requested_slots: int = 0
-    filled_slots: int = 0
-    is_partial: bool = False
-    requested_positions: int = 0
-    filled_positions: int = 0
     active_sets: Dict[str, int] = Field(default_factory=dict)
     totals_by_type: Dict[str, float] = Field(default_factory=dict)
     compromise_loss_total: float = 0.0
@@ -60,15 +55,11 @@ class ProfileRaw(BaseModel):
     score: Optional[float] = None
     set_score: Optional[float] = None
     orb_score: Optional[float] = None
-    requested_slots: int = 0
-    filled_slots: int = 0
     is_partial: bool = False
     assignments: Dict[str, List[OrbOut]] = Field(default_factory=dict)
 
 class RawPayload(BaseModel):
     combined_score: Optional[float] = None
-    requested_slots: int = 0
-    filled_slots: int = 0
     is_partial: bool = False
     shared_summary: Optional[SharedSummaryOut] = None
     run_diagnostics: Optional[Dict[str, Any]] = None
@@ -79,14 +70,10 @@ class SummaryProfile(BaseModel):
     score: Optional[float] = None
     set_score: Optional[float] = None
     orb_score: Optional[float] = None
-    requested_slots: int = 0
-    filled_slots: int = 0
     is_partial: bool = False
 
 class SummaryPayload(BaseModel):
     combined_score: Optional[float] = None
-    requested_slots: int = 0
-    filled_slots: int = 0
     is_partial: bool = False
     shared_summary: Optional[SharedSummaryOut] = None
     run_diagnostics: Optional[Dict[str, Any]] = None

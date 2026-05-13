@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from orb_optimizer.defaults import DEFAULT_SET_COUNTS, DEFAULT_SET_PRIORITY_WEIGHTS
 from orb_optimizer.data_loader import DataLoader
-from orb_optimizer.models import Category, Inputs, Orb, ProfileConfig
+from orb_optimizer.models import AssignedOrb, Category, Inputs, Orb, ProfileConfig
+from orb_optimizer.reporter import OptimizationReporter
 from orb_optimizer.solvers.beam import UnifiedOptimizer
 from orb_optimizer.solvers.greedy import GreedyOptimizer
 from orb_optimizer.utils import build_profiles_from_json
@@ -116,6 +118,14 @@ def test_greedy_shared_slots_respect_per_profile_set_cap() -> None:
     assert result.shared_summary.requested_positions == 12
     assert result.shared_summary.filled_positions <= 10
     assert set(result.shared_summary.compromise_loss_by_profile.keys()) == {"P1", "P2"}
+    assert sum(result.shared_summary.active_sets.values()) == result.shared_summary.filled_slots
+
+    p1_values = [
+        orb.value
+        for group in result.profiles["P1"].loadout.values()
+        for orb in group
+    ]
+    assert abs(sum(result.shared_summary.totals_by_type.values()) - sum(p1_values)) < 1e-9
 
 
 def test_greedy_restarts_are_non_regressive() -> None:
@@ -193,3 +203,39 @@ def test_beam_populates_shared_summary() -> None:
     assert result.shared_summary.requested_positions == 12
     assert result.shared_summary.filled_positions <= 12
     assert set(result.shared_summary.compromise_loss_by_profile.keys()) == {"P1", "P2"}
+
+
+def test_defaults_include_beelzebub_spelling() -> None:
+    assert "Beelzebub" in DEFAULT_SET_COUNTS
+    assert DEFAULT_SET_COUNTS["Beelzebub"] == [1, 3, 5]
+    assert "Beelzebub" in DEFAULT_SET_PRIORITY_WEIGHTS
+    assert "Beezlebub" not in DEFAULT_SET_COUNTS
+    assert "Beezlebub" not in DEFAULT_SET_PRIORITY_WEIGHTS
+
+
+def test_reporter_active_set_contrib_uses_profile_power() -> None:
+    profile = ProfileConfig(
+        name="P1",
+        objective="sets-first",
+        set_priority={"Beelzebub": 2.0},
+        orb_type_weights={},
+        orb_level_weights={},
+        power=2.0,
+        epsilon=0.0,
+        weight=1.0,
+        categories=[Category(name="Soul", slots=5)],
+    )
+    loadout = {
+        "Soul": [
+            AssignedOrb(type="Flame", set="Beelzebub", rarity="Rare", level=0, value=0.0),
+            AssignedOrb(type="Water", set="Beelzebub", rarity="Rare", level=0, value=0.0),
+            AssignedOrb(type="Wind", set="Beelzebub", rarity="Rare", level=0, value=0.0),
+            AssignedOrb(type="Earth", set="Beelzebub", rarity="Rare", level=0, value=0.0),
+            AssignedOrb(type="Sun", set="Beelzebub", rarity="Rare", level=0, value=0.0),
+        ]
+    }
+
+    rows = OptimizationReporter(use_colors=False)._active_sets_table(loadout, profile)
+    row = next(r for r in rows if r["set"] == "Beelzebub")
+    assert row["tiers"] == 3
+    assert row["contrib"] == 18.0  # weight(2) * tiers(3)^power(2)

@@ -209,10 +209,6 @@ def build_shared_summary(
                     )
                 )
 
-                if selected_orb is not None:
-                    active_sets[_orb_set(selected_orb)] += 1
-                    totals_by_type[_orb_type(selected_orb)] += _safe_float(getattr(selected_orb, "value", 0.0))
-
             slot_rows.append(
                 SharedSlotAssignment(
                     category=category,
@@ -224,6 +220,15 @@ def build_shared_summary(
                     profile_impacts=impacts,
                 )
             )
+
+            # Aggregate set/type summary by unique orb signature for this shared slot.
+            # This avoids double-counting when the same shared orb is present across profiles.
+            unique_orbs_by_signature: Dict[tuple, Any] = {}
+            for orb in selected_non_null:
+                unique_orbs_by_signature[_orb_signature(orb)] = orb
+            for orb in unique_orbs_by_signature.values():
+                active_sets[_orb_set(orb)] += 1
+                totals_by_type[_orb_type(orb)] += _safe_float(getattr(orb, "value", 0.0))
 
     compromise_loss_total = sum(compromise_loss_by_profile.values())
 

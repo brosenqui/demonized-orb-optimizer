@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import Section from "@/components/ui/Section";
 import { Button } from "@/components/ui/button";
 import type { CategoryRarity, OptimizeProfileIn } from "@/lib/types";
@@ -28,6 +30,8 @@ export default function ProfilesEditor({
   availableSets,
   availableTypes,
 }: ProfilesEditorProps) {
+  const [collapsedProfiles, setCollapsedProfiles] = useState<Record<number, boolean>>({});
+
   return (
     <Section
       title="Profiles"
@@ -42,18 +46,53 @@ export default function ProfilesEditor({
       <div className="space-y-4">
         {profiles.length === 0 && <p className="text-sm text-muted-foreground">No profiles yet.</p>}
 
-        {profiles.map((profile, index) => (
-          <ProfileCardWithTemplates
-            key={index}
-            value={profile}
-            onChange={(next) => onUpdateProfile(index, next)}
-            onRemove={() => onRemoveProfile(index)}
-            onSetCategory={(category, rarity) => onSetCategory(index, category, rarity)}
-            templates={PRIORITY_TEMPLATES}
-            availableSets={availableSets}
-            availableTypes={availableTypes}
-          />
-        ))}
+        {profiles.map((profile, index) => {
+          const profileTitle = profile.name.trim() || `Profile ${index + 1}`;
+          const isCollapsed = collapsedProfiles[index] ?? false;
+          return (
+            <div
+              key={index}
+              className="rounded-2xl border border-zinc-200 bg-white/70 p-3 shadow-sm backdrop-blur"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-base font-semibold">{profileTitle}</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setCollapsedProfiles((current) => ({
+                      ...current,
+                      [index]: !isCollapsed,
+                    }))
+                  }
+                  aria-expanded={!isCollapsed}
+                  aria-label={isCollapsed ? `Expand profile ${profileTitle}` : `Collapse profile ${profileTitle}`}
+                  title={isCollapsed ? `Expand profile ${profileTitle}` : `Collapse profile ${profileTitle}`}
+                  className="h-7 w-7 p-0"
+                >
+                  {isCollapsed ? (
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                  )}
+                </Button>
+              </div>
+              {!isCollapsed && (
+                <div className="mt-3">
+                  <ProfileCardWithTemplates
+                    value={profile}
+                    onChange={(next) => onUpdateProfile(index, next)}
+                    onRemove={() => onRemoveProfile(index)}
+                    onSetCategory={(category, rarity) => onSetCategory(index, category, rarity)}
+                    templates={PRIORITY_TEMPLATES}
+                    availableSets={availableSets}
+                    availableTypes={availableTypes}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </Section>
   );

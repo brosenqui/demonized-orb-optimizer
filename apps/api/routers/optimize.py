@@ -69,8 +69,6 @@ def _summarize_result_multi(
     normalized_profiles: List[Dict[str, Any]],
     combined_score: float | None,
     *,
-    requested_slots: int,
-    filled_slots: int,
     is_partial: bool,
     shared_summary: Dict[str, Any] | None,
     run_diagnostics: Dict[str, Any] | None,
@@ -78,8 +76,6 @@ def _summarize_result_multi(
     """Compact UI summary derived from already-normalized profiles."""
     return {
         "combined_score": combined_score,
-        "requested_slots": requested_slots,
-        "filled_slots": filled_slots,
         "is_partial": is_partial,
         "shared_summary": shared_summary,
         "run_diagnostics": run_diagnostics,
@@ -89,8 +85,6 @@ def _summarize_result_multi(
                 "score": (p.get("set_score") or 0.0) + (p.get("orb_score") or 0.0),
                 "set_score": p.get("set_score"),
                 "orb_score": p.get("orb_score"),
-                "requested_slots": p.get("requested_slots", 0),
-                "filled_slots": p.get("filled_slots", 0),
                 "is_partial": p.get("is_partial", False),
             }
             for p in normalized_profiles
@@ -110,15 +104,11 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
         "result": {
           "summary": {
             "combined_score": number|null,
-            "requested_slots": int,
-            "filled_slots": int,
             "is_partial": bool,
             "profiles": [{ name, score?, set_score?, orb_score? }, ...]
           },
           "raw": {
             "combined_score": number|null,
-            "requested_slots": int,
-            "filled_slots": int,
             "is_partial": bool,
             "profiles": [
               {
@@ -126,8 +116,6 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
                 "score": number|null,
                 "set_score": number|null,
                 "orb_score": number|null,
-                "requested_slots": int,
-                "filled_slots": int,
                 "is_partial": bool,
                 "assignments": { [category]: [ {type,set,rarity,value,level,awakened,slot_index?}, ... ] }
               },
@@ -196,8 +184,6 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     # ---- Canonicalize response shape (profiles as array; use assignments key) ----
     combined = getattr(result, "combined_score", None)
     combined_round = round(float(combined), 6) if isinstance(combined, (int, float)) else None
-    requested_slots = int(getattr(result, "requested_slots", 0) or 0)
-    filled_slots = int(getattr(result, "filled_slots", 0) or 0)
     is_partial = bool(getattr(result, "is_partial", False))
     shared_summary = shared_summary_to_dict(getattr(result, "shared_summary", None))
     run_diagnostics = getattr(result, "run_diagnostics", None) or None
@@ -243,8 +229,6 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
                 "score": round(total, 6),
                 "set_score": (round(float(set_s), 6) if isinstance(set_s, (int, float)) else None),
                 "orb_score": (round(float(orb_s), 6) if isinstance(orb_s, (int, float)) else None),
-                "requested_slots": req_slots,
-                "filled_slots": fill_slots,
                 "is_partial": partial,
                 "assignments": assignments,
             }
@@ -253,8 +237,6 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
     summary = _summarize_result_multi(
         normalized_profiles,
         combined_round,
-        requested_slots=requested_slots,
-        filled_slots=filled_slots,
         is_partial=is_partial,
         shared_summary=shared_summary,
         run_diagnostics=run_diagnostics,
@@ -268,8 +250,6 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
             summary=summary,
             raw={
                 "combined_score": combined_round,
-                "requested_slots": requested_slots,
-                "filled_slots": filled_slots,
                 "is_partial": is_partial,
                 "shared_summary": shared_summary,
                 "run_diagnostics": run_diagnostics,

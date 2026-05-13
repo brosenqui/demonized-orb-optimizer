@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import ResultViewer from "@/features/results/components/ResultViewer";
 import type { OptimizeResponse } from "@/lib/types";
@@ -8,15 +8,8 @@ const SUCCESS_RESPONSE: OptimizeResponse = {
   result: {
     summary: {
       combined_score: 10,
-      requested_slots: 4,
-      filled_slots: 3,
       is_partial: true,
       shared_summary: {
-        requested_slots: 1,
-        filled_slots: 1,
-        is_partial: false,
-        requested_positions: 1,
-        filled_positions: 1,
         active_sets: { Lucifer: 1 },
         totals_by_type: { Flame: 10 },
         compromise_loss_total: 0,
@@ -35,23 +28,14 @@ const SUCCESS_RESPONSE: OptimizeResponse = {
           score: 10,
           set_score: 6,
           orb_score: 4,
-          requested_slots: 4,
-          filled_slots: 3,
           is_partial: true,
         },
       ],
     },
     raw: {
       combined_score: 10,
-      requested_slots: 4,
-      filled_slots: 3,
       is_partial: true,
       shared_summary: {
-        requested_slots: 1,
-        filled_slots: 1,
-        is_partial: false,
-        requested_positions: 1,
-        filled_positions: 1,
         active_sets: { Lucifer: 1 },
         totals_by_type: { Flame: 10 },
         compromise_loss_total: 0,
@@ -70,8 +54,6 @@ const SUCCESS_RESPONSE: OptimizeResponse = {
           score: 10,
           set_score: 6,
           orb_score: 4,
-          requested_slots: 4,
-          filled_slots: 3,
           is_partial: true,
           assignments: {
             Soul: [
@@ -87,6 +69,35 @@ const SUCCESS_RESPONSE: OptimizeResponse = {
           },
         },
       ],
+    },
+  },
+};
+
+const NO_SHARED_SELECTIONS_RESPONSE: OptimizeResponse = {
+  ...SUCCESS_RESPONSE,
+  result: {
+    ...SUCCESS_RESPONSE.result,
+    summary: {
+      ...SUCCESS_RESPONSE.result.summary,
+      shared_summary: {
+        active_sets: {},
+        totals_by_type: {},
+        compromise_loss_total: 0,
+        compromise_loss_by_profile: {},
+        cap_limited_slots_by_profile: {},
+        slots: [],
+      },
+    },
+    raw: {
+      ...SUCCESS_RESPONSE.result.raw,
+      shared_summary: {
+        active_sets: {},
+        totals_by_type: {},
+        compromise_loss_total: 0,
+        compromise_loss_by_profile: {},
+        cap_limited_slots_by_profile: {},
+        slots: [],
+      },
     },
   },
 };
@@ -112,6 +123,24 @@ describe("ResultViewer", () => {
     expect(screen.getByText("Profile: Main")).toBeInTheDocument();
     expect(screen.getByText("Combined Score:")).toBeInTheDocument();
     expect(screen.getByText("Shared Slot Summary")).toBeInTheDocument();
-    expect(screen.getByText("Advanced shared diagnostics")).toBeInTheDocument();
+    expect(screen.getByText("Advanced Diagnostics")).toBeInTheDocument();
+    expect(screen.queryByText("Complete assignment")).not.toBeInTheDocument();
+  });
+
+  it("hides shared summary when no shared selections exist", () => {
+    render(<ResultViewer data={NO_SHARED_SELECTIONS_RESPONSE} loading={false} error={null} />);
+    expect(screen.queryByText("Shared Slot Summary")).not.toBeInTheDocument();
+    expect(screen.getByText("Advanced Diagnostics")).toBeInTheDocument();
+  });
+
+  it("collapses and expands profile sections", () => {
+    render(<ResultViewer data={SUCCESS_RESPONSE} loading={false} error={null} />);
+    expect(screen.getByText("Soul")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse profile Main" }));
+    expect(screen.queryByText("Soul")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand profile Main" }));
+    expect(screen.getByText("Soul")).toBeInTheDocument();
   });
 });

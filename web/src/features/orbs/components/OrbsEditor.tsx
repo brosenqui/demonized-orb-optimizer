@@ -56,7 +56,8 @@ export default function OrbsEditor({
   const [openForm, setOpenForm] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [form, setForm] = useState<OrbFormState>(() => createDefaultOrbFormState());
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [collectionOpen, setCollectionOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const {
     selectedTypes,
@@ -157,6 +158,7 @@ export default function OrbsEditor({
 
         if (event.key.toLowerCase() === "f") {
           event.preventDefault();
+          setCollectionOpen(true);
           setFiltersOpen((open) => !open);
           return;
         }
@@ -170,8 +172,11 @@ export default function OrbsEditor({
         !isTextEntryTarget(event.target)
       ) {
         event.preventDefault();
+        setCollectionOpen(true);
         setFiltersOpen(true);
-        searchInputRef.current?.focus();
+        requestAnimationFrame(() => {
+          searchInputRef.current?.focus();
+        });
       }
     }
 
@@ -213,40 +218,25 @@ export default function OrbsEditor({
         </div>
       }
     >
-      {/* Filters */}
-      <div className="mb-4 rounded-md border border-border p-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-medium inline-flex items-center gap-2">
-            <Filter className="h-4 w-4" aria-hidden="true" />
-            Filters
-          </p>
+      <div className="rounded-md border border-border">
+        <div className="flex items-center justify-between gap-2 p-3">
+          <p className="text-sm font-medium">Orb Collection</p>
           <div className="flex items-center gap-2">
             {totalCount > 0 && (
               <span className="text-xs text-muted-foreground">
                 {visibleCount}/{totalCount} shown
               </span>
             )}
-            {hasActiveFilters && (
-              <span className="text-xs text-muted-foreground">
-                {activeFilterGroups} active
-              </span>
-            )}
-            {hasActiveFilters && (
-              <Button variant="ghost" size="sm" onClick={resetFilters} aria-label="Reset all filters">
-                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                Reset
-              </Button>
-            )}
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setFiltersOpen((open) => !open)}
-              aria-expanded={filtersOpen}
-              aria-label={filtersOpen ? "Collapse filters" : "Expand filters"}
-              title={filtersOpen ? "Collapse filters" : "Expand filters"}
+              onClick={() => setCollectionOpen((open) => !open)}
+              aria-expanded={collectionOpen}
+              aria-label={collectionOpen ? "Collapse orb collection" : "Expand orb collection"}
+              title={collectionOpen ? "Collapse orb collection" : "Expand orb collection"}
               className="h-7 w-7 p-0"
             >
-              {filtersOpen ? (
+              {collectionOpen ? (
                 <ChevronUp className="h-4 w-4" aria-hidden="true" />
               ) : (
                 <ChevronDown className="h-4 w-4" aria-hidden="true" />
@@ -255,60 +245,102 @@ export default function OrbsEditor({
           </div>
         </div>
 
-        {filtersOpen && (
-          <div className="mt-3">
-            <OrbsFilterBar
-              allTypes={ORB_TYPES}
-              allSets={ORB_SETS}
-              allRarities={rarityOptions}
-              selectedTypes={selectedTypes}
-              setSelectedTypes={setSelectedTypes}
-              selectedSets={selectedSets}
-              setSelectedSets={setSelectedSets}
-              selectedRarities={selectedRarities}
-              setSelectedRarities={setSelectedRarities}
-              levelMin={levelMin}
-              levelMax={levelMax}
-              setLevelMin={setLevelMin}
-              setLevelMax={setLevelMax}
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              searchInputRef={searchInputRef}
-            />
+        {collectionOpen && (
+          <div className="px-3 pb-3">
+            {/* Filters */}
+            <div className="mb-4 rounded-md border border-border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium inline-flex items-center gap-2">
+                  <Filter className="h-4 w-4" aria-hidden="true" />
+                  Filters
+                </p>
+                <div className="flex items-center gap-2">
+                  {hasActiveFilters && (
+                    <span className="text-xs text-muted-foreground">
+                      {activeFilterGroups} active
+                    </span>
+                  )}
+                  {hasActiveFilters && (
+                    <Button variant="ghost" size="sm" onClick={resetFilters} aria-label="Reset all filters">
+                      <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                      Reset
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setFiltersOpen((open) => !open)}
+                    aria-expanded={filtersOpen}
+                    aria-label={filtersOpen ? "Collapse filters" : "Expand filters"}
+                    title={filtersOpen ? "Collapse filters" : "Expand filters"}
+                    className="h-7 w-7 p-0"
+                  >
+                    {filtersOpen ? (
+                      <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {filtersOpen && (
+                <div className="mt-3">
+                  <OrbsFilterBar
+                    allTypes={ORB_TYPES}
+                    allSets={ORB_SETS}
+                    allRarities={rarityOptions}
+                    selectedTypes={selectedTypes}
+                    setSelectedTypes={setSelectedTypes}
+                    selectedSets={selectedSets}
+                    setSelectedSets={setSelectedSets}
+                    selectedRarities={selectedRarities}
+                    setSelectedRarities={setSelectedRarities}
+                    levelMin={levelMin}
+                    levelMax={levelMax}
+                    setLevelMin={setLevelMin}
+                    setLevelMax={setLevelMax}
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    searchInputRef={searchInputRef}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Grid + empty states */}
+            {orbs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No orbs yet. Import JSON or click “Add Orb”.
+              </p>
+            ) : visibleOrbs.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                No orbs match your filters.
+                {hasActiveFilters && (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="underline underline-offset-4"
+                      onClick={resetFilters}
+                    >
+                      Reset filters
+                    </button>
+                    .
+                  </>
+                )}
+              </div>
+            ) : (
+              <OrbGrid
+                orbs={visibleOrbs}
+                density={density}
+                onTileClick={handleEditAtVisibleIndex}
+                onTileDelete={handleDeleteAtVisibleIndex}
+              />
+            )}
           </div>
         )}
       </div>
-
-      {/* Grid + empty states */}
-      {orbs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No orbs yet. Import JSON or click “Add Orb”.
-        </p>
-      ) : visibleOrbs.length === 0 ? (
-        <div className="text-sm text-muted-foreground">
-          No orbs match your filters.
-          {hasActiveFilters && (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="underline underline-offset-4"
-                onClick={resetFilters}
-              >
-                Reset filters
-              </button>
-              .
-            </>
-          )}
-        </div>
-      ) : (
-        <OrbGrid
-          orbs={visibleOrbs}
-          density={density}
-          onTileClick={handleEditAtVisibleIndex}
-          onTileDelete={handleDeleteAtVisibleIndex}
-        />
-      )}
 
       <OrbFormDialog
         open={openForm}

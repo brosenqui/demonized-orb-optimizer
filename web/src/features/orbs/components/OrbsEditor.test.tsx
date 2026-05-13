@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import OrbsEditor from "@/features/orbs/components/OrbsEditor";
@@ -68,11 +68,28 @@ describe("OrbsEditor import flow", () => {
     expect(screen.getByRole("heading", { name: "Add Orb" })).toBeInTheDocument();
   });
 
-  it("focuses search input on slash shortcut", () => {
+  it("focuses search input on slash shortcut", async () => {
     render(<TestHarness />);
 
     fireEvent.keyDown(window, { key: "/" });
 
-    expect(screen.getByLabelText("Search")).toHaveFocus();
+    await waitFor(() => expect(screen.getByLabelText("Search")).toHaveFocus());
+  });
+
+  it("starts with filters collapsed by default", () => {
+    render(<TestHarness />);
+    expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand filters" }));
+    expect(screen.getByLabelText("Search")).toBeInTheDocument();
+  });
+
+  it("collapses and expands orb collection", () => {
+    render(<TestHarness />);
+
+    expect(screen.getByText("Filters")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse orb collection" }));
+    expect(screen.queryByText("Filters")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand orb collection" }));
+    expect(screen.getByText("Filters")).toBeInTheDocument();
   });
 });

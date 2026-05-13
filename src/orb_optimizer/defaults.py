@@ -2,7 +2,7 @@
 
 DEFAULT_SET_PRIORITY_WEIGHTS: dict[str, float] = {
     "Leviathan": 1.0,
-    "Beezlebub": 1.0,
+    "Beelzebub": 1.0,
     "Belphegor": 1.0,
     "Asmodeus": 1.0,
     "Mammon": 1.1,
@@ -39,7 +39,7 @@ DEFAULT_SET_COUNTS: dict[str, list[int]] = {
     "Leviathan": [3, 5, 6],
     "Satan": [4, 5, 6],
     "Asmodeus": [2, 4],
-    "Beezlebub": [1, 3, 5],
+    "Beelzebub": [1, 3, 5],
     "Belphegor": [2, 4, 6],
 }
 

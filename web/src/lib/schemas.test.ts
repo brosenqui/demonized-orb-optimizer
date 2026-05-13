@@ -42,15 +42,8 @@ describe("schemas", () => {
       result: {
         summary: {
           combined_score: 12,
-          requested_slots: 4,
-          filled_slots: 3,
           is_partial: true,
           shared_summary: {
-            requested_slots: 2,
-            filled_slots: 1,
-            is_partial: true,
-            requested_positions: 2,
-            filled_positions: 1,
             active_sets: { Lucifer: 1 },
             totals_by_type: { Flame: 12 },
             compromise_loss_total: 0.5,
@@ -69,23 +62,14 @@ describe("schemas", () => {
               score: 12,
               set_score: 8,
               orb_score: 4,
-              requested_slots: 4,
-              filled_slots: 3,
               is_partial: true,
             },
           ],
         },
         raw: {
           combined_score: 12,
-          requested_slots: 4,
-          filled_slots: 3,
           is_partial: true,
           shared_summary: {
-            requested_slots: 2,
-            filled_slots: 1,
-            is_partial: true,
-            requested_positions: 2,
-            filled_positions: 1,
             active_sets: { Lucifer: 1 },
             totals_by_type: { Flame: 12 },
             compromise_loss_total: 0.5,
@@ -104,8 +88,6 @@ describe("schemas", () => {
               score: 12,
               set_score: 8,
               orb_score: 4,
-              requested_slots: 4,
-              filled_slots: 3,
               is_partial: true,
               assignments: {
                 Soul: [
