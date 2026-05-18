@@ -10,6 +10,7 @@ from apps.api.schemas import OptimizeRequest, OptimizeResponse, OptimizeResult, 
 from orb_optimizer.io.loader import Loader
 from orb_optimizer.io.sources import DictSource
 from orb_optimizer.models import Inputs, ProfileConfig, Category
+from orb_optimizer.shareability import normalize_shareability_matrix
 from orb_optimizer.solvers.greedy import GreedyOptimizer
 from orb_optimizer.shared_summary import shared_summary_to_dict
 
@@ -154,11 +155,26 @@ def optimize(req: OptimizeRequest, request: Request) -> OptimizeResponse:
             )
         )
 
+    profile_names = [profile.name for profile in profiles]
+    if len(set(profile_names)) != len(profile_names):
+        raise HTTPException(status_code=400, detail="Profile names must be unique for shareability_matrix keys.")
+    categories = sorted({category.name for profile in profiles for category in profile.categories})
+
+    try:
+        shareability_matrix = normalize_shareability_matrix(
+            categories=categories,
+            profile_names=profile_names,
+            shareability_matrix=req.shareability_matrix,
+            strict=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     # ---- Inputs ----
     inputs = Inputs(
         orbs=orbs,
         profiles=profiles,
-        shareable_categories=req.shareable_categories or None,
+        shareability_matrix=shareability_matrix,
     )
 
     # ---- Solve (greedy unified) ----

@@ -11,6 +11,7 @@ from .models import (
     SharedSlotProfileImpact,
     SharedSummary,
 )
+from .shareability import enabled_profiles_by_category
 
 MarginalGainFn = Callable[[ProfileConfig, Any, Counter], Tuple[float, float]]
 PrimaryCoeffFn = Callable[[ProfileConfig], Tuple[float, float]]
@@ -67,13 +68,14 @@ def build_shared_summary(
     profiles: Sequence[ProfileConfig],
     assignments: Dict[str, Dict[str, List[Any]]],
     slots_by_profile: Dict[str, Dict[str, int]],
-    shareable_categories: Set[str],
+    shareability_matrix: Dict[str, Dict[str, bool]] | None,
     candidate_orbs: Sequence[Any],
     marginal_gain_fn: MarginalGainFn,
     primary_coeff_fn: PrimaryCoeffFn,
     set_cap_fn: SetCapFn,
 ) -> SharedSummary:
-    if not shareable_categories:
+    enabled_by_category = enabled_profiles_by_category(shareability_matrix)
+    if not enabled_by_category:
         return SharedSummary()
 
     requested_slots = 0
@@ -87,23 +89,27 @@ def build_shared_summary(
     cap_limited_slots_by_profile: defaultdict[str, int] = defaultdict(int)
     slot_rows: List[SharedSlotAssignment] = []
 
-    for category in sorted(shareable_categories):
+    for category, enabled_profiles in sorted(enabled_by_category.items()):
+        if len(enabled_profiles) < 2:
+            continue
         max_slots = max((slots_by_profile.get(p.name, {}).get(category, 0) for p in profiles), default=0)
         if max_slots <= 0:
             continue
 
         for slot_index in range(max_slots):
-            eligible_profiles = [
-                p for p in profiles if slot_index < slots_by_profile.get(p.name, {}).get(category, 0)
+            sharing_profiles = [
+                p
+                for p in profiles
+                if (
+                    slot_index < slots_by_profile.get(p.name, {}).get(category, 0)
+                    and p.name in enabled_profiles
+                )
             ]
-            if not eligible_profiles:
+            if len(sharing_profiles) < 2:
                 continue
 
-            requested_slots += 1
-            requested_positions += len(eligible_profiles)
-
             selected_by_profile: Dict[str, Optional[Any]] = {}
-            for profile in eligible_profiles:
+            for profile in sharing_profiles:
                 loadout = assignments.get(profile.name, {})
                 cat_orbs = loadout.get(category, [])
                 selected_by_profile[profile.name] = (
@@ -111,18 +117,36 @@ def build_shared_summary(
                 )
 
             selected_non_null = [orb for orb in selected_by_profile.values() if orb is not None]
-            if selected_non_null and len(selected_non_null) == len(eligible_profiles):
-                filled_slots += 1
-            filled_positions += len(selected_non_null)
+            if len(selected_non_null) < 2:
+                continue
 
-            signatures = {_orb_signature(orb) for orb in selected_non_null}
-            is_uniform = len(signatures) == 1 and len(selected_non_null) == len(eligible_profiles)
-            uniform_orb = selected_non_null[0] if is_uniform else None
+            grouped_orbs: defaultdict[tuple, List[Any]] = defaultdict(list)
+            for orb in selected_non_null:
+                grouped_orbs[_orb_signature(orb)].append(orb)
+            shared_signatures = {
+                signature: orb_group
+                for signature, orb_group in grouped_orbs.items()
+                if len(orb_group) >= 2
+            }
+            if not shared_signatures:
+                continue
+
+            requested_slots += 1
+            filled_slots += 1
+            requested_positions += len(sharing_profiles)
+            filled_positions += sum(len(group) for group in shared_signatures.values())
+
+            is_uniform = len(shared_signatures) == 1 and len(selected_non_null) == len(sharing_profiles)
+            uniform_orb = (
+                next(iter(shared_signatures.values()))[0]
+                if is_uniform
+                else None
+            )
 
             profile_orbs: Dict[str, Optional[AssignedOrb]] = {}
             impacts: List[SharedSlotProfileImpact] = []
 
-            for profile in eligible_profiles:
+            for profile in sharing_profiles:
                 selected_orb = selected_by_profile[profile.name]
                 profile_orbs[profile.name] = (
                     _to_assigned(selected_orb, slot_index) if selected_orb is not None else None
@@ -213,7 +237,7 @@ def build_shared_summary(
                 SharedSlotAssignment(
                     category=category,
                     slot_index=slot_index,
-                    profiles=[p.name for p in eligible_profiles],
+                    profiles=[p.name for p in sharing_profiles],
                     is_uniform=is_uniform,
                     orb=_to_assigned(uniform_orb, slot_index) if uniform_orb is not None else None,
                     profile_orbs=profile_orbs,
@@ -221,12 +245,11 @@ def build_shared_summary(
                 )
             )
 
-            # Aggregate set/type summary by unique orb signature for this shared slot.
-            # This avoids double-counting when the same shared orb is present across profiles.
-            unique_orbs_by_signature: Dict[tuple, Any] = {}
-            for orb in selected_non_null:
-                unique_orbs_by_signature[_orb_signature(orb)] = orb
-            for orb in unique_orbs_by_signature.values():
+            unique_shared_orbs: Dict[tuple, Any] = {
+                signature: orb_group[0]
+                for signature, orb_group in shared_signatures.items()
+            }
+            for orb in unique_shared_orbs.values():
                 active_sets[_orb_set(orb)] += 1
                 totals_by_type[_orb_type(orb)] += _safe_float(getattr(orb, "value", 0.0))
 

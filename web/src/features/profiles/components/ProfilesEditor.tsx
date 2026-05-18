@@ -2,15 +2,15 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import Section from "@/components/ui/Section";
 import { Button } from "@/components/ui/button";
-import type { CategoryRarity, OptimizeProfileIn } from "@/lib/types";
+import type { CategoryRarity, OptimizeProfileIn, ShareabilityMatrix } from "@/lib/types";
 import { PRIORITY_TEMPLATES } from "@/lib/priorityTemplates";
 import ProfileCardWithTemplates from "./ProfileCardWithTemplate";
-import ShareablePicker from "./ShareablePicker";
+import ShareabilityMatrixEditor from "./ShareabilityMatrixEditor";
 
 type ProfilesEditorProps = {
   profiles: OptimizeProfileIn[];
-  shareable: readonly string[];
-  setShareable: (shareable: string[]) => void;
+  shareabilityMatrix: ShareabilityMatrix;
+  setShareabilityMatrix: (shareabilityMatrix: ShareabilityMatrix) => void;
   onAddProfile: () => void;
   onUpdateProfile: (index: number, profile: OptimizeProfileIn) => void;
   onRemoveProfile: (index: number) => void;
@@ -21,8 +21,8 @@ type ProfilesEditorProps = {
 
 export default function ProfilesEditor({
   profiles,
-  shareable,
-  setShareable,
+  shareabilityMatrix,
+  setShareabilityMatrix,
   onAddProfile,
   onUpdateProfile,
   onRemoveProfile,
@@ -38,12 +38,16 @@ export default function ProfilesEditor({
       helpText="Define optimization profiles to guide orb selection priorities, type weights, and category rarity targets."
       actions={
         <div className="flex items-center gap-2">
-          <ShareablePicker value={shareable} onChange={setShareable} />
           <Button onClick={onAddProfile}>Add Profile</Button>
         </div>
       }
     >
       <div className="space-y-4">
+        <ShareabilityMatrixEditor
+          profiles={profiles}
+          value={shareabilityMatrix}
+          onChange={setShareabilityMatrix}
+        />
         {profiles.length === 0 && <p className="text-sm text-muted-foreground">No profiles yet.</p>}
 
         {profiles.map((profile, index) => {

@@ -41,7 +41,7 @@ type Props = {
   onRemove: () => void;
   availableSets: readonly string[];
   availableTypes: readonly string[];
-  // NEW: bubble category changes to parent so it can propagate if shareable
+  // Bubble category changes to parent so it can propagate within matrix-enabled profiles.
   onSetCategory: (cat: string, rarity: CategoryRarity | "") => void;
 };
 

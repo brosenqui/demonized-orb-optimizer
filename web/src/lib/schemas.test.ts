@@ -5,7 +5,9 @@ describe("schemas", () => {
   it("parses and normalizes optimize request", () => {
     const request = parseOptimizeRequest({
       algorithm: "greedy",
-      shareable_categories: ["Soul"],
+      shareability_matrix: {
+        Soul: { Main: true },
+      },
       orbs: [
         {
           type: "Flame",

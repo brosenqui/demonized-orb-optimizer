@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Mapping, Tuple, Union, TYPE_CHECKING
 
 from .sources import FileSource, DictSource
 from . import parsers
 from ..models import Category, Orb, ProfileConfig
+from ..shareability import matrix_from_shareable_categories, normalize_shareability_matrix
 from ..defaults import (
     DEFAULT_SET_COUNTS,
     DEFAULT_ORB_LEVEL_WEIGHTS,
@@ -74,7 +75,7 @@ class Loader:
         source: SourceLike,
         *,
         inflate_assets: bool = True,
-    ) -> Tuple[List[ProfileConfig], List[str]]:
+    ) -> Tuple[List[ProfileConfig], Dict[str, Dict[str, bool]]]:
         """
         Load profiles either from file path (string/FileSource) or in-memory dict (DictSource).
 
@@ -83,10 +84,10 @@ class Loader:
           - orb_weights -> dict loaded from file
           - orb_level_weights -> dict loaded from file
 
-        Returns: (profiles, shareable_categories)
+        Returns: (profiles, shareability_matrix)
         """
         data, base_dir = self._coerce_to_data_and_base(source)
-        profiles_raw, shareable = parsers.parse_profiles_header(data)
+        profiles_raw, shareability_payload = parsers.parse_profiles_header(data)
         out: List[ProfileConfig] = []
 
         for pj in profiles_raw:
@@ -119,7 +120,32 @@ class Loader:
                 )
             )
 
-        return out, list(shareable or [])
+        profile_names = [profile.name for profile in out]
+        if len(set(profile_names)) != len(profile_names):
+            raise ValueError("Profile names must be unique for shareability_matrix keys.")
+        categories = sorted(
+            {
+                category.name
+                for profile in out
+                for category in (profile.categories or [])
+            }
+        )
+
+        if isinstance(shareability_payload, list):
+            matrix = matrix_from_shareable_categories(
+                categories=categories,
+                profile_names=profile_names,
+                shareable_categories=shareability_payload,
+            )
+        else:
+            matrix = normalize_shareability_matrix(
+                categories=categories,
+                profile_names=profile_names,
+                shareability_matrix=shareability_payload,
+                strict=True,
+            )
+
+        return out, matrix
 
     # ---------- Helpers ----------
     def _coerce_to_data_and_base(self, source: SourceLike) -> tuple[Any, Path | None]:

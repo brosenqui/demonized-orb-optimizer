@@ -143,7 +143,7 @@ class ProfileConfig:
 class Inputs:
     orbs: List[Orb]
     profiles: List[ProfileConfig]
-    shareable_categories: Optional[List[str]] = None
+    shareability_matrix: Optional[Dict[str, Dict[str, bool]]] = None
 
 @dataclass
 class AssignedOrb:

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ProfilesEditor from "@/features/profiles/components/ProfilesEditor";
-import type { OptimizeProfileIn } from "@/lib/types";
+import type { OptimizeProfileIn, ShareabilityMatrix } from "@/lib/types";
 
 const PROFILE: OptimizeProfileIn = {
   name: "Main",
@@ -18,12 +18,16 @@ const PROFILE: OptimizeProfileIn = {
 };
 
 describe("ProfilesEditor", () => {
+  const MATRIX: ShareabilityMatrix = {
+    Soul: { Main: true },
+  };
+
   it("collapses and expands profile configuration cards", () => {
     render(
       <ProfilesEditor
         profiles={[PROFILE]}
-        shareable={[]}
-        setShareable={vi.fn()}
+        shareabilityMatrix={MATRIX}
+        setShareabilityMatrix={vi.fn()}
         onAddProfile={vi.fn()}
         onUpdateProfile={vi.fn()}
         onRemoveProfile={vi.fn()}

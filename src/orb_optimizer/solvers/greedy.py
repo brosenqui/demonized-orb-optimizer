@@ -1,8 +1,10 @@
-"""Greedy solver (multi-profile, shared pool; shareables + type-unique per category).
+"""Greedy solver (multi-profile, shared pool; matrix-based strict sharing).
 
 Rules:
   • Inventory is global and exclusive: each physical orb can be used once overall.
-  • Shareable categories place one physical orb into all eligible profiles for the slot.
+  • Sharing is matrix-gated per category/profile.
+  • For each category slot, all sharing-enabled profiles must use the same orb.
+  • Non-enabled profiles fill that slot independently.
   • Type-uniqueness per category per profile.
   • Per-profile set caps: a set cannot exceed max(DEFAULT_SET_COUNTS[set]).
 
@@ -21,6 +23,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..defaults import DEFAULT_SET_COUNTS
 from ..models import AssignedOrb, MultiProfileResult, Orb, ProfileConfig, ProfileResult
+from ..orb_level_bonus import cumulative_gate_value_for_orb
+from ..shareability import enabled_profiles_by_category, normalize_shareability_matrix
 from ..shared_summary import build_shared_summary
 
 # Heuristic defaults
@@ -41,11 +45,6 @@ SET_MAX_COUNTS: dict[str, int] = {
 
 # ----------------------------- helpers -----------------------------
 
-def tiers_from_level(level: int) -> int:
-    """Count level tiers unlocked at 3, 6, 9."""
-    return (1 if level >= 3 else 0) + (1 if level >= 6 else 0) + (1 if level >= 9 else 0)
-
-
 def get_set(o: Orb) -> str:
     """Robust accessor for set name."""
     return getattr(o, "set", None) or getattr(o, "set", "") or ""
@@ -57,14 +56,6 @@ def awakened_levels(o: Any) -> int:
     except Exception:
         value = 0
     return max(0, value)
-
-
-def effective_level(o: Any) -> int:
-    try:
-        base_level = int(getattr(o, "level", 0))
-    except Exception:
-        base_level = 0
-    return max(0, base_level) + awakened_levels(o)
 
 
 def strong_orb_key(o: Orb) -> tuple:
@@ -140,8 +131,6 @@ class GreedyOptimizer:
 
         self.orbs: List[Orb] = list(self.P.orbs)
         self.profiles: List[ProfileConfig] = list(self.P.profiles)
-        self.shareable: Set[str] = set(getattr(self.P, "shareable_categories", None) or [])
-
         self._slots: Dict[str, Dict[str, int]] = {}
         for p in self.profiles:
             cats = getattr(p, "categories", None) or []
@@ -150,6 +139,14 @@ class GreedyOptimizer:
         self._all_cats: Set[str] = set()
         for slot_map in self._slots.values():
             self._all_cats.update(slot_map.keys())
+
+        self._shareability_matrix = normalize_shareability_matrix(
+            categories=sorted(self._all_cats),
+            profile_names=[profile.name for profile in self.profiles],
+            shareability_matrix=getattr(self.P, "shareability_matrix", None),
+            strict=False,
+        )
+        self._share_enabled_by_category = enabled_profiles_by_category(self._shareability_matrix)
 
         self._requested_slots_by_profile: Dict[str, int] = {
             p.name: sum(self._slots[p.name].values()) for p in self.profiles
@@ -168,7 +165,7 @@ class GreedyOptimizer:
             self._type_values[orb_type].sort()
         for orb_type, typed in self._orbs_by_type_sorted.items():
             typed.sort(
-                key=lambda orb: float(getattr(orb, "value", 0.0)) + tiers_from_level(effective_level(orb)),
+                key=lambda orb: float(getattr(orb, "value", 0.0)) + cumulative_gate_value_for_orb(orb),
                 reverse=True,
             )
             self._orbs_by_type_sorted[orb_type] = typed
@@ -180,10 +177,12 @@ class GreedyOptimizer:
             f"(Top-K={self.topk}/type, restarts={self.restarts}, time_budget={self.max_time_ms}ms, "
             f"{len(self.profiles)} profiles)"
         )
-        if self.shareable:
-            self.logger.info("🔗 Shareable categories: " + ", ".join(sorted(self.shareable)))
+        if self._share_enabled_by_category:
+            self.logger.info(
+                "🔗 Sharing-enabled categories: " + ", ".join(sorted(self._share_enabled_by_category.keys()))
+            )
         else:
-            self.logger.info("🔗 Shareable categories: (none)")
+            self.logger.info("🔗 Sharing-enabled categories: (none)")
         self.logger.info(f"⚙️ Heuristic coefficients: ALPHA={self.alpha:.2f}, BETA={self.beta:.2f}")
 
     # ---------------- Public API ----------------
@@ -265,171 +264,106 @@ class GreedyOptimizer:
         }
         set_counts = {p.name: Counter() for p in self.profiles}
         used_ids_global: set[tuple] = set()
+        profile_order_map = {profile.name: idx for idx, profile in enumerate(profile_order)}
+        existing_types_per_prof: Dict[str, Dict[str, Set[str]]] = {
+            profile.name: {cat: set() for cat in self._slots[profile.name].keys()}
+            for profile in self.profiles
+        }
 
-        # -------- Fill shareable categories --------
         for cat in sorted(self._all_cats):
-            if cat not in self.shareable:
-                continue
-            max_slots = max(self._slots[p.name].get(cat, 0) for p in self.profiles)
+            max_slots = max(self._slots[profile.name].get(cat, 0) for profile in self.profiles)
             if max_slots <= 0:
                 continue
 
-            existing_types_per_prof: Dict[str, Set[str]] = {
-                p.name: {ao.type for ao in assign[p.name][cat]} for p in self.profiles
-            }
+            category_share_enabled = self._share_enabled_by_category.get(cat, set())
 
             for slot_index in range(max_slots):
-                eligible_profiles = [p for p in self.profiles if slot_index < self._slots[p.name].get(cat, 0)]
+                eligible_profiles = [
+                    profile
+                    for profile in self.profiles
+                    if slot_index < self._slots[profile.name].get(cat, 0)
+                ]
                 if not eligible_profiles:
-                    break
-                self._diag_shareable_slots_attempted += 1
-
-                best_orb: Optional[Orb] = None
-                best_score = -float("inf")
-                candidate_debug: List[Dict[str, Any]] = []
-
-                union_types: Set[str] = set()
-                for p in eligible_profiles:
-                    union_types |= existing_types_per_prof[p.name]
-
-                for orb_type, pool in self._candidates_by_type.items():
-                    if orb_type in union_types:
-                        continue
-                    for orb in pool:
-                        orb_id = strong_orb_key(orb)
-                        if orb_id in used_ids_global:
-                            continue
-
-                        if any(orb.type in existing_types_per_prof[p.name] for p in eligible_profiles):
-                            continue
-                        if not self._can_assign_to_profiles(orb, eligible_profiles, set_counts):
-                            self._diag_set_cap_rejections += 1
-                            continue
-                        self._diag_candidate_evaluations += 1
-
-                        combined = 0.0
-                        per_prof_details: Dict[str, Dict[str, float]] = {}
-                        for p in eligible_profiles:
-                            d_set, d_orb = self._marginal_gain(p, orb, set_counts[p.name])
-                            coeffs = self._profile_coeffs(p)
-                            prof_score = coeffs.set_primary * d_set + coeffs.orb_primary * d_orb
-                            combined += p.weight * prof_score
-                            per_prof_details[p.name] = {
-                                "d_set": d_set,
-                                "d_orb": d_orb,
-                                "score": prof_score,
-                            }
-
-                        tie_break = sum(v["d_set"] + v["d_orb"] for v in per_prof_details.values()) * 1e-6
-                        total_score = combined + tie_break
-                        if total_score > best_score:
-                            best_score = total_score
-                            best_orb = orb
-
-                        if self.enable_debug_breakdown:
-                            candidate_debug.append(
-                                {"orb": orb, "combined": combined, "per_profile": per_prof_details}
-                            )
-
-                if best_orb is None:
-                    self._diag_no_viable_slots += 1
                     continue
 
-                for p in eligible_profiles:
-                    assigned = AssignedOrb(
-                        type=getattr(best_orb, "type", ""),
-                        set=get_set(best_orb),
-                        rarity=getattr(best_orb, "rarity", "Rare"),
-                        level=int(getattr(best_orb, "level", 0)),
-                        value=float(getattr(best_orb, "value", 0.0)),
-                        awakened=awakened_levels(best_orb),
+                share_group = sorted(
+                    [profile for profile in eligible_profiles if profile.name in category_share_enabled],
+                    key=lambda profile: profile_order_map.get(profile.name, 0),
+                )
+                solo_group = sorted(
+                    [profile for profile in eligible_profiles if profile.name not in category_share_enabled],
+                    key=lambda profile: profile_order_map.get(profile.name, 0),
+                )
+
+                if len(share_group) >= 2:
+                    self._diag_shareable_slots_attempted += 1
+                    shared_action = self._best_orb_for_group(
+                        category=cat,
                         slot_index=slot_index,
+                        group=share_group,
+                        existing_types_per_prof=existing_types_per_prof,
+                        set_counts=set_counts,
+                        used_ids_global=used_ids_global,
                     )
-                    assign[p.name][cat].append(assigned)
-                    set_counts[p.name][assigned.set] += 1
-                    existing_types_per_prof[p.name].add(assigned.type)
-
-                used_ids_global.add(strong_orb_key(best_orb))
-                self._diag_shareable_slots_filled += 1
-
-                if self.enable_debug_breakdown and candidate_debug:
-                    self._log_candidate_debug(cat, slot_index, candidate_debug, chosen=best_orb)
-
-        # -------- Fill non-shareable categories (profile order matters) --------
-        for prof in profile_order:
-            cats_sorted = sorted(
-                (cat for cat, slots in self._slots[prof.name].items() if cat not in self.shareable and slots > 0),
-                key=lambda cat_name: -self._slots[prof.name][cat_name],
-            )
-            for cat in cats_sorted:
-                slots_needed = self._slots[prof.name][cat]
-                types_in_cat = {ao.type for ao in assign[prof.name][cat]}
-
-                for slot_index in range(len(assign[prof.name][cat]), slots_needed):
-                    self._diag_nonshareable_slots_attempted += 1
-                    best_orb: Optional[Orb] = None
-                    best_score = -float("inf")
-                    candidate_debug: List[Dict[str, Any]] = []
-                    coeffs = self._profile_coeffs(prof)
-
-                    for orb_type, pool in self._candidates_by_type.items():
-                        if orb_type in types_in_cat:
-                            continue
-
-                        for orb in pool:
-                            orb_id = strong_orb_key(orb)
-                            if orb_id in used_ids_global:
-                                continue
-                            if orb.type in types_in_cat:
-                                continue
-                            if not self._can_assign_set(prof, orb, set_counts[prof.name]):
-                                self._diag_set_cap_rejections += 1
-                                continue
-                            self._diag_candidate_evaluations += 1
-
-                            d_set, d_orb = self._marginal_gain(prof, orb, set_counts[prof.name])
-                            score = coeffs.set_primary * d_set + coeffs.orb_primary * d_orb
-                            tie_break = (d_set + d_orb) * 1e-6
-                            total_score = score + tie_break
-                            if total_score > best_score:
-                                best_score = total_score
-                                best_orb = orb
-
-                            if self.enable_debug_breakdown:
-                                candidate_debug.append(
-                                    {
-                                        "orb": orb,
-                                        "combined": score,
-                                        "per_profile": {
-                                            prof.name: {"d_set": d_set, "d_orb": d_orb, "score": score}
-                                        },
-                                    }
-                                )
-
-                    if best_orb is None:
-                        self.logger.debug(
-                            f"ℹ️ No viable orb for {prof.name}:{cat} slot {slot_index + 1}/{slots_needed}"
-                        )
+                    if shared_action is None:
                         self._diag_no_viable_slots += 1
-                        break
+                        self.logger.debug(
+                            f"ℹ️ No viable orb for strict shared slot {cat}:{slot_index + 1}; "
+                            f"unfilled profiles: {', '.join(profile.name for profile in share_group)}"
+                        )
+                    else:
+                        best_orb, candidate_debug = shared_action
+                        self._apply_orb_to_group(
+                            category=cat,
+                            slot_index=slot_index,
+                            orb=best_orb,
+                            group=share_group,
+                            assign=assign,
+                            set_counts=set_counts,
+                            existing_types_per_prof=existing_types_per_prof,
+                            used_ids_global=used_ids_global,
+                        )
+                        self._diag_shareable_slots_filled += 1
+                        if self.enable_debug_breakdown and candidate_debug:
+                            self._log_candidate_debug(cat, slot_index, candidate_debug, chosen=best_orb)
 
-                    assigned = AssignedOrb(
-                        type=getattr(best_orb, "type", ""),
-                        set=get_set(best_orb),
-                        rarity=getattr(best_orb, "rarity", "Rare"),
-                        level=int(getattr(best_orb, "level", 0)),
-                        value=float(getattr(best_orb, "value", 0.0)),
-                        awakened=awakened_levels(best_orb),
+                for profile in solo_group:
+                    self._diag_nonshareable_slots_attempted += 1
+                    solo_action = self._best_orb_for_group(
+                        category=cat,
                         slot_index=slot_index,
+                        group=[profile],
+                        existing_types_per_prof=existing_types_per_prof,
+                        set_counts=set_counts,
+                        used_ids_global=used_ids_global,
                     )
-                    assign[prof.name][cat].append(assigned)
-                    set_counts[prof.name][assigned.set] += 1
-                    used_ids_global.add(strong_orb_key(best_orb))
-                    types_in_cat.add(assigned.type)
-                    self._diag_nonshareable_slots_filled += 1
+                    if solo_action is None:
+                        self._diag_no_viable_slots += 1
+                        self.logger.debug(
+                            f"ℹ️ No viable orb for {profile.name}:{cat} slot {slot_index + 1}"
+                        )
+                        continue
 
+                    best_orb, candidate_debug = solo_action
+                    self._apply_orb_to_group(
+                        category=cat,
+                        slot_index=slot_index,
+                        orb=best_orb,
+                        group=[profile],
+                        assign=assign,
+                        set_counts=set_counts,
+                        existing_types_per_prof=existing_types_per_prof,
+                        used_ids_global=used_ids_global,
+                    )
+                    self._diag_nonshareable_slots_filled += 1
                     if self.enable_debug_breakdown and candidate_debug:
-                        self._log_candidate_debug(cat, slot_index, candidate_debug, chosen=best_orb, profile=prof.name)
+                        self._log_candidate_debug(
+                            cat,
+                            slot_index,
+                            candidate_debug,
+                            chosen=best_orb,
+                            profile=profile.name,
+                        )
 
         # -------- Final scoring + coverage --------
         per_profile: Dict[str, ProfileResult] = {}
@@ -475,7 +409,7 @@ class GreedyOptimizer:
                 profiles=self.profiles,
                 assignments=assign,
                 slots_by_profile=self._slots,
-                shareable_categories=self.shareable,
+                shareability_matrix=self._shareability_matrix,
                 candidate_orbs=self.orbs,
                 marginal_gain_fn=self._marginal_gain,
                 primary_coeff_fn=coeff_tuple,
@@ -518,10 +452,8 @@ class GreedyOptimizer:
         base = percentile_within_type(self._type_values, getattr(orb, "type", ""), raw)
         d_orb = base * prof.orb_type_weights.get(getattr(orb, "type", ""), 1.0)
 
-        orb_level = effective_level(orb)
-        lvl_tiers = tiers_from_level(orb_level)
-        d_orb += prof.orb_level_weights.get(str(orb_level), 0.0)
-        d_orb += lvl_tiers * prof.orb_level_weights.get(getattr(orb, "type", ""), 0.0)
+        gate_bonus = cumulative_gate_value_for_orb(orb)
+        d_orb += gate_bonus * prof.orb_level_weights.get(getattr(orb, "type", ""), 0.0)
         return d_set, d_orb
 
     # ---------------- Scoring ----------------
@@ -551,10 +483,8 @@ class GreedyOptimizer:
             base = percentile_within_type(self._type_values, getattr(ao, "type", ""), raw)
             orb_score += base * prof.orb_type_weights.get(getattr(ao, "type", ""), 1.0)
 
-            orb_level = effective_level(ao)
-            lvl_tiers = tiers_from_level(orb_level)
-            orb_score += prof.orb_level_weights.get(str(orb_level), 0.0)
-            orb_score += lvl_tiers * prof.orb_level_weights.get(getattr(ao, "type", ""), 0.0)
+            gate_bonus = cumulative_gate_value_for_orb(ao)
+            orb_score += gate_bonus * prof.orb_level_weights.get(getattr(ao, "type", ""), 0.0)
         return set_score, orb_score
 
     def _primary_secondary(self, prof: ProfileConfig, set_s: float, orb_s: float) -> Tuple[float, float]:
@@ -586,6 +516,90 @@ class GreedyOptimizer:
         set_counts: Dict[str, Counter],
     ) -> bool:
         return all(self._can_assign_set(profile, orb, set_counts[profile.name]) for profile in profiles)
+
+    def _best_orb_for_group(
+        self,
+        *,
+        category: str,
+        slot_index: int,
+        group: List[ProfileConfig],
+        existing_types_per_prof: Dict[str, Dict[str, Set[str]]],
+        set_counts: Dict[str, Counter],
+        used_ids_global: Set[tuple],
+    ) -> Optional[Tuple[Orb, List[Dict[str, Any]]]]:
+        best_orb: Optional[Orb] = None
+        best_score = -float("inf")
+        candidate_debug: List[Dict[str, Any]] = []
+
+        for orb_type, pool in self._candidates_by_type.items():
+            for orb in pool:
+                orb_id = strong_orb_key(orb)
+                if orb_id in used_ids_global:
+                    continue
+
+                if any(orb_type in existing_types_per_prof[profile.name][category] for profile in group):
+                    continue
+                if not self._can_assign_to_profiles(orb, group, set_counts):
+                    self._diag_set_cap_rejections += 1
+                    continue
+
+                self._diag_candidate_evaluations += 1
+                combined = 0.0
+                per_prof_details: Dict[str, Dict[str, float]] = {}
+                for profile in group:
+                    d_set, d_orb = self._marginal_gain(profile, orb, set_counts[profile.name])
+                    coeffs = self._profile_coeffs(profile)
+                    profile_score = coeffs.set_primary * d_set + coeffs.orb_primary * d_orb
+                    combined += profile.weight * profile_score
+                    per_prof_details[profile.name] = {
+                        "d_set": d_set,
+                        "d_orb": d_orb,
+                        "score": profile_score,
+                    }
+
+                tie_break = (
+                    sum(value["d_set"] + value["d_orb"] for value in per_prof_details.values()) * 1e-6
+                    + (len(group) * 1e-7)
+                )
+                total_score = combined + tie_break
+                if total_score > best_score:
+                    best_score = total_score
+                    best_orb = orb
+
+                if self.enable_debug_breakdown:
+                    candidate_debug.append({"orb": orb, "combined": combined, "per_profile": per_prof_details})
+
+        if best_orb is None:
+            return None
+        return best_orb, candidate_debug
+
+    def _apply_orb_to_group(
+        self,
+        *,
+        category: str,
+        slot_index: int,
+        orb: Orb,
+        group: List[ProfileConfig],
+        assign: Dict[str, Dict[str, List[AssignedOrb]]],
+        set_counts: Dict[str, Counter],
+        existing_types_per_prof: Dict[str, Dict[str, Set[str]]],
+        used_ids_global: Set[tuple],
+    ) -> None:
+        for profile in group:
+            assigned = AssignedOrb(
+                type=getattr(orb, "type", ""),
+                set=get_set(orb),
+                rarity=getattr(orb, "rarity", "Rare"),
+                level=int(getattr(orb, "level", 0)),
+                value=float(getattr(orb, "value", 0.0)),
+                awakened=awakened_levels(orb),
+                slot_index=slot_index,
+            )
+            assign[profile.name][category].append(assigned)
+            set_counts[profile.name][assigned.set] += 1
+            existing_types_per_prof[profile.name][category].add(assigned.type)
+
+        used_ids_global.add(strong_orb_key(orb))
 
     # ---------------- Multi-start helpers ----------------
     def _build_candidates_by_type(self, topk: int) -> Dict[str, List[Orb]]:

@@ -85,7 +85,7 @@ If optional files are missing, **built-in defaults** are used automatically.
 | `slots.json` | ✅ Yes | `--slots` | Defines category names and slot counts per rarity. | Must exist. |
 | `set_priority.json` | ❌ Optional | `--set-priority` | Maps orb sets → priority weights. | Uses `DEFAULT_SET_PRIORITY_WEIGHTS`. |
 | `orb_weights.json` | ❌ Optional | `--orb-weights` | Maps orb type → weighting multiplier. | Uses `DEFAULT_ORB_TYPE_WEIGHTS`. |
-| `orb_level_weights.json` | ❌ Optional | `--orb-level-weights` | Orb type → additive bonus per tier (3/6/9). | Uses `DEFAULT_ORB_LEVEL_WEIGHTS`. |
+| `orb_level_weights.json` | ❌ Optional | `--orb-level-weights` | Orb type → multiplier for level-gate bonuses (3/6/9). | Uses `DEFAULT_ORB_LEVEL_WEIGHTS`. |
 | `profiles.json` | ❌ Optional | `--profiles` | Defines multiple optimization profiles with weights and parameters. | If omitted, a single “default” profile is synthesized. |
 
 ---

@@ -5,8 +5,8 @@ import { ORB_SETS, ORB_TYPES } from "@/lib/orbData";
 export default function ProfilesFeature() {
   const {
     profiles,
-    shareable,
-    setShareable,
+    shareabilityMatrix,
+    setShareabilityMatrix,
     addProfile,
     updateProfile,
     removeProfile,
@@ -16,8 +16,8 @@ export default function ProfilesFeature() {
   return (
     <ProfilesEditor
       profiles={profiles}
-      shareable={shareable}
-      setShareable={setShareable}
+      shareabilityMatrix={shareabilityMatrix}
+      setShareabilityMatrix={setShareabilityMatrix}
       onAddProfile={addProfile}
       onUpdateProfile={updateProfile}
       onRemoveProfile={removeProfile}

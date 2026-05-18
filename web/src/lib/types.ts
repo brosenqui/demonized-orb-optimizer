@@ -42,10 +42,12 @@ export type OptimizeProfileIn = {
   slots?: Record<string, number>;
 };
 
+export type ShareabilityMatrix = Record<string, Record<string, boolean>>;
+
 export type OptimizeRequest = {
   orbs: OrbIn[];
   profiles: OptimizeProfileIn[];
-  shareable_categories?: string[];
+  shareability_matrix?: ShareabilityMatrix;
   algorithm: "greedy";
 };
 

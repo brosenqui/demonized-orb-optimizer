@@ -47,7 +47,7 @@ export const optimizeProfileInSchema = z.object({
 export const optimizeRequestSchema = z.object({
   orbs: z.array(orbInSchema),
   profiles: z.array(optimizeProfileInSchema),
-  shareable_categories: z.array(z.string()).optional(),
+  shareability_matrix: z.record(z.string(), z.record(z.string(), z.boolean())).optional(),
   algorithm: z.literal("greedy"),
 });
 

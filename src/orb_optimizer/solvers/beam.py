@@ -10,11 +10,13 @@ import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from collections import Counter, defaultdict
 from dataclasses import asdict
-from itertools import combinations, product
+from itertools import combinations
 from typing import Any, Dict, List, Tuple, Optional
 
 from ..models import Orb, Category, ProfileConfig, ProfileResult, MultiProfileResult
 from ..defaults import DEFAULT_SET_COUNTS
+from ..orb_level_bonus import base_orb_level, cumulative_gate_value_for_orb
+from ..shareability import enabled_profiles_by_category, normalize_shareability_matrix
 from ..shared_summary import build_shared_summary
 
 SET_MAX_COUNTS: dict[str, int] = {
@@ -37,14 +39,6 @@ def _awakened_levels(o: Orb) -> int:
         value = 0
     return max(0, value)
 
-def _effective_level(o: Orb) -> int:
-    try:
-        base_level = int(getattr(o, "level", 0))
-    except Exception:
-        base_level = 0
-    return max(0, base_level) + _awakened_levels(o)
-
-
 def orb_key(o: Orb) -> tuple:
     """Stable identity for an orb across processes and duplicate-stat inventories."""
     stable_id = getattr(o, "id", None)
@@ -65,11 +59,6 @@ def orb_key(o: Orb) -> tuple:
 def _orb_ids(objs: List[Orb] | Tuple[Orb, ...]) -> set[tuple]:
     """Set of stable orb keys for fast collision checks."""
     return {orb_key(o) for o in objs}
-
-
-def _combo_key(combo: tuple[Orb, ...]) -> tuple:
-    """Hashable identity for a combo: sorted stable keys."""
-    return tuple(sorted(orb_key(o) for o in combo))
 
 
 # --------- Batch scoring for multiprocessing (picklable ctx) ---------
@@ -152,7 +141,7 @@ def _score_combo_batch(
 # --------------------------- Unified Optimizer ---------------------------
 
 class UnifiedOptimizer:
-    """Joint beam optimizer for N profiles (N≥1) with ranked-per-type normalization.
+    """Joint beam optimizer for N profiles (N≥1) with matrix-gated strict sharing.
 
     Construct with:
         UnifiedOptimizer(logger=logger, inputs=<shared parsed inputs>, topk_per_category=12)
@@ -160,7 +149,7 @@ class UnifiedOptimizer:
     The `inputs` object is expected to expose:
       - inputs.orbs: List[Orb]
       - inputs.profiles: List[ProfileConfig]  (categories are attached per profile)
-      - inputs.shareable_categories: Optional[List[str]]
+      - inputs.shareability_matrix: Optional[Dict[str, Dict[str, bool]]]
     """
 
     def __init__(
@@ -181,8 +170,6 @@ class UnifiedOptimizer:
         self.topk = int(max(1, topk_per_category))
         self.parallelism = str(parallelism or "auto").lower()
         self.max_time_ms = max(1, int(max_time_ms))
-        self.shareable = set(getattr(self.P, "shareable_categories", None) or [])
-
         # Normalize categories from profile-attached configs (or optional top-level list if present).
         input_categories = getattr(self.P, "categories", None)
         if input_categories:
@@ -201,6 +188,14 @@ class UnifiedOptimizer:
             self._slots_by_profile[prof.name] = {
                 cat.name: int(cat.slots) for cat in (getattr(prof, "categories", None) or [])
             }
+
+        self._shareability_matrix = normalize_shareability_matrix(
+            categories=[category.name for category in self.categories],
+            profile_names=[profile.name for profile in self.P.profiles],
+            shareability_matrix=getattr(self.P, "shareability_matrix", None),
+            strict=False,
+        )
+        self._share_enabled_by_category = enabled_profiles_by_category(self._shareability_matrix)
 
         # Score caches
         self._orb_base_scores: Dict[tuple, float] = {}
@@ -235,12 +230,12 @@ class UnifiedOptimizer:
         self.logger.info("📊 Category Analysis:")
         for cat in self.categories:
             total = len(self._valid_combos_by_cat[cat.name])
-            slots_needed = cat.slots if cat.name in self.shareable else cat.slots * len(self.P.profiles)
+            slots_needed = cat.slots if self._category_has_sharing(cat.name) else cat.slots * len(self.P.profiles)
             combos_per_slot = (total / slots_needed) if slots_needed else 0.0
             self.logger.info(
                 f"   • {cat.name}: {total:,} combos, {slots_needed} slots needed, "
                 f"{combos_per_slot:.1f} combos/slot"
-                f"{' (Shareable)' if cat.name in self.shareable else ''}"
+                f"{' (Share-enabled)' if self._category_has_sharing(cat.name) else ''}"
             )
         names = ", ".join(
             f"{p.name}(w={p.weight:g}, obj={p.objective}, ε={p.epsilon:g}, ᵖ={p.power:g})"
@@ -248,7 +243,12 @@ class UnifiedOptimizer:
         )
         self.logger.info(f"👥 Profiles: {names}")
         self.logger.info(
-            "🔗 Shareable categories: " + (", ".join(sorted(self.shareable)) if self.shareable else "(none)")
+            "🔗 Sharing-enabled categories: "
+            + (
+                ", ".join(sorted(category for category in self._share_enabled_by_category if self._category_has_sharing(category)))
+                if self._share_enabled_by_category
+                else "(none)"
+            )
         )
         self.logger.info(f"🎛️ Top-K per category: {self.topk}")
 
@@ -264,7 +264,7 @@ class UnifiedOptimizer:
                 raw = 0.0
             k = orb_key(orb)
             self._orb_base_scores[k] = self._percentile_within_type(orb.type, raw)
-            self._orb_level_scores[k] = _tiers_from_level(_effective_level(orb))
+            self._orb_level_scores[k] = cumulative_gate_value_for_orb(orb)
         self.logger.info("✓ Finished precomputing scores for %d orbs", len(self.P.orbs))
 
     def _percentile_within_type(self, t: str, v: float) -> float:
@@ -348,6 +348,31 @@ class UnifiedOptimizer:
         d_orb += self._orb_level_scores[key] * prof.orb_level_weights.get(orb.type, 0.0)
         return d_set, d_orb
 
+    def _category_has_sharing(self, category_name: str) -> bool:
+        return len(self._share_enabled_by_category.get(category_name, set())) >= 2
+
+    def _profiles_can_share(self, category_name: str, left_profile: str, right_profile: str) -> bool:
+        enabled = self._share_enabled_by_category.get(category_name, set())
+        return left_profile in enabled and right_profile in enabled
+
+    def _strict_sharing_satisfied(self, assignments: Dict[str, Dict[str, List[Orb]]]) -> bool:
+        for cat in self.categories:
+            enabled = self._share_enabled_by_category.get(cat.name, set())
+            if len(enabled) < 2:
+                continue
+            expected_signature: tuple[tuple, ...] | None = None
+            for profile in self.P.profiles:
+                if profile.name not in enabled:
+                    continue
+                combo = assignments[profile.name][cat.name]
+                signature = tuple(orb_key(orb) for orb in combo)
+                if expected_signature is None:
+                    expected_signature = signature
+                    continue
+                if signature != expected_signature:
+                    return False
+        return True
+
     # --------------------------- optimization ---------------------------
 
     def optimize(self, beam_width: int = 200) -> MultiProfileResult:
@@ -387,16 +412,19 @@ class UnifiedOptimizer:
         cats_info = []
         for cat in self.categories:
             total_combos = len(self._valid_combos_by_cat[cat.name])
-            slot_demand = cat.slots if cat.name in self.shareable else cat.slots * len(self.P.profiles)
+            slot_demand = cat.slots if self._category_has_sharing(cat.name) else cat.slots * len(self.P.profiles)
             combo_size_score = math.log10(total_combos) if total_combos > 0 else 0.0
             cats_info.append((cat, total_combos, combo_size_score, slot_demand))
 
-        cats_info.sort(key=lambda x: (int(x[2] * 100), 0 if x[0].name in self.shareable else 1, -x[3]))
+        cats_info.sort(
+            key=lambda x: (int(x[2] * 100), 0 if self._category_has_sharing(x[0].name) else 1, -x[3])
+        )
         self.logger.info("📊 Category processing order (from smallest to largest search space):")
         for i, (cat, total_combos, score, slots) in enumerate(cats_info, 1):
             self.logger.info(
                 f"   {i}. {cat.name:<6} - {total_combos:,} combinations"
-                f" (log10 score: {score:.1f}) | {slots} {'shared ' if cat.name in self.shareable else ''}slots"
+                f" (log10 score: {score:.1f}) | {slots} "
+                f"{'share-enabled ' if self._category_has_sharing(cat.name) else ''}slots"
             )
         cats = [c[0] for c in cats_info]
 
@@ -499,22 +527,15 @@ class UnifiedOptimizer:
                 scored.sort(key=lambda x: x[0], reverse=True)
                 return scored
 
-            if cat.name in self.shareable:
-                self.logger.info(f"⏳ Scoring combinations for shared category {cat.name} using {num_procs} processes")
-                scored = _score_all_batches(profile_dict=None)
+            for p_idx, p in enumerate(self.P.profiles):
+                self.logger.info(
+                    f"⏳ Scoring combinations for profile {p.name} ({p_idx + 1}/{len(self.P.profiles)}) "
+                    f"using {num_procs} processes"
+                )
+                scored = _score_all_batches(profile_dict=asdict(p))
                 min_required = max(adaptive_topk, int(total_combos * 0.1))
                 top = [c for _, c in scored[:min_required]]
-                scored_combos.extend([top] * len(self.P.profiles))
-            else:
-                for p_idx, p in enumerate(self.P.profiles):
-                    self.logger.info(
-                        f"⏳ Scoring combinations for profile {p.name} ({p_idx + 1}/{len(self.P.profiles)}) "
-                        f"using {num_procs} processes"
-                    )
-                    scored = _score_all_batches(profile_dict=asdict(p))
-                    min_required = max(adaptive_topk, int(total_combos * 0.1))
-                    top = [c for _, c in scored[:min_required]]
-                    scored_combos.append(top)
+                scored_combos.append(top)
 
             # Expand beam with the chosen lists
             next_states = self._expand_with_lists(partials, scored_combos, cat)
@@ -534,7 +555,7 @@ class UnifiedOptimizer:
                     self._diag_no_feasible_categories += 1
                     self.logger.warning(
                         "⚠️ No feasible states after full retry; returning best partial assignment so far. "
-                        f"Category={cat.name}, combos={total_full}, shareable={cat.name in self.shareable}."
+                        f"Category={cat.name}, combos={total_full}, share_enabled={self._category_has_sharing(cat.name)}."
                     )
                     break
 
@@ -587,7 +608,7 @@ class UnifiedOptimizer:
                 profiles=self.P.profiles,
                 assignments=best_state["assign"],
                 slots_by_profile=self._slots_by_profile,
-                shareable_categories=self.shareable,
+                shareability_matrix=self._shareability_matrix,
                 candidate_orbs=self.P.orbs,
                 marginal_gain_fn=self._marginal_gain,
                 primary_coeff_fn=lambda profile: (
@@ -624,14 +645,17 @@ class UnifiedOptimizer:
         cat: Category,
     ) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
-        shared_attempts = divergent_attempts = 0
-        shared_valid = divergent_valid = 0
+        attempts = 0
+        valid_states = 0
         max_attempts_per_state = 1000  # safety
+        profile_count = len(self.P.profiles)
+        category_enabled = self._share_enabled_by_category.get(cat.name, set())
+        sharing_enabled = len(category_enabled) >= 2
 
         # Filter/prioritize based on reservations
         filtered_lists: List[List[tuple[Orb, ...]]] = []
         for prof_list in per_prof_lists:
-            if cat.name not in self.shareable:
+            if not sharing_enabled:
                 reserved_combos = [
                     combo for combo in prof_list
                     if all(self._can_use_orb(orb, cat) for orb in combo)
@@ -649,97 +673,131 @@ class UnifiedOptimizer:
 
         for state in partials_in:
             used_ids = state["used_ids"]
-
-            # 1) Shared-first
-            if cat.name in self.shareable:
-                pool_map: Dict[tuple, tuple[Orb, ...]] = {}
-                for lst in per_prof_lists:
-                    for c in lst:
-                        pool_map[_combo_key(c)] = c
-                for c in pool_map.values():
-                    shared_attempts += 1
-                    ids = _orb_ids(c)
-                    if used_ids & ids:
+            options_with_ids: List[List[tuple[tuple[Orb, ...], set[tuple]]]] = []
+            has_empty_options = False
+            for combos in per_prof_lists:
+                profile_options: List[tuple[tuple[Orb, ...], set[tuple]]] = []
+                for combo in combos:
+                    combo_ids = _orb_ids(combo)
+                    if used_ids & combo_ids:
                         continue
-                    new_assign = self._copy_assign_with(state["assign"], cat.name, [c] * len(self.P.profiles))
-                    if not self._within_set_caps(new_assign):
-                        self._diag_set_cap_rejections += 1
-                        continue
-                    new_used = used_ids | ids
-                    key = self._key(new_assign)
-                    out.append({"assign": new_assign, "used_ids": new_used, "key": key})
-                    shared_valid += 1
-
-            # 2) Divergent (Cartesian)
-            attempts_this_state = 0
-            for choices in product(*per_prof_lists):
-                attempts_this_state += 1
-                if attempts_this_state > max_attempts_per_state:
+                    profile_options.append((combo, combo_ids))
+                if not profile_options:
+                    has_empty_options = True
                     break
+                options_with_ids.append(profile_options)
+            if has_empty_options:
+                continue
 
-                divergent_attempts += 1
-                id_sets = [_orb_ids(cmb) for cmb in choices]
+            enabled_indices = (
+                sorted(
+                    (
+                        idx
+                        for idx, profile in enumerate(self.P.profiles)
+                        if profile.name in category_enabled
+                    ),
+                    key=lambda idx: len(options_with_ids[idx]),
+                )
+                if sharing_enabled
+                else []
+            )
+            solo_indices = sorted(
+                [idx for idx in range(profile_count) if idx not in enabled_indices],
+                key=lambda idx: len(options_with_ids[idx]),
+            )
 
-                if cat.name in self.shareable:
-                    # equal-or-disjoint + no overlap with used_ids
-                    if any(used_ids & s for s in id_sets):
-                        continue
-                    valid = True
-                    for i in range(len(id_sets)):
-                        for j in range(i + 1, len(id_sets)):
-                            if id_sets[i] != id_sets[j] and (id_sets[i] & id_sets[j]):
-                                valid = False
-                                break
-                        if not valid:
-                            break
-                    if not valid:
-                        continue
-                    new_used = set(used_ids)
-                    for s in id_sets:
-                        new_used |= s
-                else:
-                    # Non-shareable: pairwise disjoint and disjoint from used_ids
-                    new_used = set(used_ids)
-                    valid = True
-                    for s in id_sets:
-                        if new_used & s:
-                            valid = False
-                            break
-                        new_used |= s
-                    if not valid:
-                        continue
-                    for i in range(len(id_sets)):
-                        for j in range(i + 1, len(id_sets)):
-                            if id_sets[i] & id_sets[j]:
-                                valid = False
-                                break
-                        if not valid:
-                            break
-                    if not valid:
-                        continue
+            attempts_this_state = 0
+            chosen: Dict[int, tuple[Orb, ...]] = {}
 
-                new_assign = self._copy_assign_with(state["assign"], cat.name, list(choices))
+            def finalize_candidate(current_used: set[tuple]) -> None:
+                nonlocal attempts, valid_states, attempts_this_state
+                if attempts_this_state >= max_attempts_per_state:
+                    return
+                attempts += 1
+                attempts_this_state += 1
+
+                choices: List[tuple[Orb, ...]] = []
+                for idx in range(profile_count):
+                    combo = chosen.get(idx)
+                    if combo is None:
+                        return
+                    choices.append(combo)
+
+                new_assign = self._copy_assign_with(state["assign"], cat.name, choices)
+                if not self._strict_sharing_satisfied(new_assign):
+                    return
                 if not self._within_set_caps(new_assign):
                     self._diag_set_cap_rejections += 1
-                    continue
+                    return
                 key = self._key(new_assign)
-                out.append({"assign": new_assign, "used_ids": new_used, "key": key})
-                divergent_valid += 1
+                out.append({"assign": new_assign, "used_ids": current_used, "key": key})
+                valid_states += 1
 
-        self._diag_expansion_attempts += shared_attempts + divergent_attempts
-        self._diag_expansion_valid += shared_valid + divergent_valid
+            def expand_solo(pos: int, current_used: set[tuple]) -> None:
+                if attempts_this_state >= max_attempts_per_state:
+                    return
+                if pos >= len(solo_indices):
+                    finalize_candidate(current_used)
+                    return
 
-        # Logs
-        if cat.name in self.shareable:
+                idx = solo_indices[pos]
+                for combo, combo_ids in options_with_ids[idx]:
+                    if current_used & combo_ids:
+                        continue
+                    chosen[idx] = combo
+                    expand_solo(pos + 1, current_used | combo_ids)
+                    if attempts_this_state >= max_attempts_per_state:
+                        return
+
+            def assign_shared_enabled(current_used: set[tuple]) -> None:
+                if attempts_this_state >= max_attempts_per_state:
+                    return
+                if not enabled_indices:
+                    expand_solo(0, current_used)
+                    return
+
+                option_maps: List[Dict[tuple[tuple, ...], tuple[tuple[Orb, ...], set[tuple]]]] = []
+                for idx in enabled_indices:
+                    option_map: Dict[tuple[tuple, ...], tuple[tuple[Orb, ...], set[tuple]]] = {}
+                    for combo, combo_ids in options_with_ids[idx]:
+                        signature = tuple(orb_key(orb) for orb in combo)
+                        option_map[signature] = (combo, combo_ids)
+                    option_maps.append(option_map)
+
+                shared_signatures = set(option_maps[0].keys())
+                for option_map in option_maps[1:]:
+                    shared_signatures &= set(option_map.keys())
+                if not shared_signatures:
+                    return
+
+                ordered_shared = sorted(shared_signatures)
+                for signature in ordered_shared:
+                    combo, combo_ids = option_maps[0][signature]
+                    if current_used & combo_ids:
+                        continue
+                    for map_idx, idx in enumerate(enabled_indices):
+                        chosen[idx] = option_maps[map_idx][signature][0]
+                    expand_solo(0, current_used | combo_ids)
+                    if attempts_this_state >= max_attempts_per_state:
+                        return
+
+            if enabled_indices:
+                assign_shared_enabled(set(used_ids))
+            else:
+                expand_solo(0, set(used_ids))
+
+        self._diag_expansion_attempts += attempts
+        self._diag_expansion_valid += valid_states
+
+        if sharing_enabled:
             self.logger.info(
-                f"🔗 {cat.name} (Shareable) - Shared attempts: {shared_attempts}, Valid: {shared_valid} "
-                f"({shared_valid/max(1,shared_attempts)*100:.1f}%) | Divergent attempts: {divergent_attempts}, "
-                f"Valid: {divergent_valid} ({divergent_valid/max(1,divergent_attempts)*100:.1f}%)"
+                f"🔗 {cat.name} (Share-enabled) - Attempts: {attempts}, Valid: {valid_states} "
+                f"({valid_states/max(1,attempts)*100:.1f}%)"
             )
         else:
             self.logger.info(
-                f"📦 {cat.name} (Non-shareable) - Attempts: {divergent_attempts}, Valid: {divergent_valid} "
-                f"({divergent_valid/max(1,divergent_attempts)*100:.1f}%)"
+                f"📦 {cat.name} (Solo-only) - Attempts: {attempts}, Valid: {valid_states} "
+                f"({valid_states/max(1,attempts)*100:.1f}%)"
             )
         return out
 
@@ -777,39 +835,24 @@ class UnifiedOptimizer:
                             tgroup[i] = new
                             trial[pname][cat.name] = tgroup
 
-                            # Category-level sharing/disjoint
+                            # Category-level overlap constraints for the edited category
                             ids_per_profile = {pp: _orb_ids(tuple(trial[pp][cat.name])) for pp in trial}
-                            if cat.name in self.shareable:
-                                ok = True
-                                names = list(trial.keys())
-                                for a in range(len(names)):
-                                    for b in range(a + 1, len(names)):
-                                        A = ids_per_profile[names[a]]
-                                        B = ids_per_profile[names[b]]
-                                        if A != B and (A & B):
-                                            ok = False
-                                            break
-                                    if not ok:
+                            names = list(trial.keys())
+                            ok = True
+                            for a in range(len(names)):
+                                for b in range(a + 1, len(names)):
+                                    overlap = ids_per_profile[names[a]] & ids_per_profile[names[b]]
+                                    if overlap and not self._profiles_can_share(cat.name, names[a], names[b]):
+                                        ok = False
                                         break
                                 if not ok:
-                                    continue
-                            else:
-                                ok = True
-                                names = list(trial.keys())
-                                for a in range(len(names)):
-                                    for b in range(a + 1, len(names)):
-                                        if ids_per_profile[names[a]] & ids_per_profile[names[b]]:
-                                            ok = False
-                                            break
-                                    if not ok:
-                                        break
-                                if not ok:
-                                    continue
+                                    break
+                            if not ok:
+                                continue
 
                             # Global inventory uniqueness constraints
                             ok = True
                             per_profile_used: dict[str, set[tuple]] = {pp: set() for pp in trial.keys()}
-                            cross_profile_used_by_cat: dict[str, set[tuple]] = {c2.name: set() for c2 in self.categories}
 
                             for pp, cats_map in trial.items():
                                 used_local = per_profile_used[pp]
@@ -819,15 +862,31 @@ class UnifiedOptimizer:
                                         ok = False
                                         break
                                     used_local |= ids
-                                    if c2.name in self.shareable:
-                                        continue
-                                    if cross_profile_used_by_cat[c2.name] & ids:
-                                        ok = False
-                                        break
-                                    cross_profile_used_by_cat[c2.name] |= ids
                                 if not ok:
                                     break
                             if not ok:
+                                continue
+
+                            for c2 in self.categories:
+                                ids_by_name = {
+                                    name: _orb_ids(tuple(trial[name][c2.name]))
+                                    for name in trial.keys()
+                                }
+                                names = list(ids_by_name.keys())
+                                for a in range(len(names)):
+                                    for b in range(a + 1, len(names)):
+                                        overlap = ids_by_name[names[a]] & ids_by_name[names[b]]
+                                        if overlap and not self._profiles_can_share(c2.name, names[a], names[b]):
+                                            ok = False
+                                            break
+                                    if not ok:
+                                        break
+                                if not ok:
+                                    break
+                            if not ok:
+                                continue
+
+                            if not self._strict_sharing_satisfied(trial):
                                 continue
 
                             if not self._within_set_caps(trial):
@@ -861,7 +920,7 @@ class UnifiedOptimizer:
     def _calculate_reserved_orbs(self) -> Dict[str, Dict[str, List[Orb]]]:
         """Reserve top orbs for non-shareable categories with smarter allocation."""
         reserved: Dict[str, Dict[str, List[Orb]]] = {}
-        non_shareable_cats = [c for c in self.categories if c.name not in self.shareable]
+        non_shareable_cats = [c for c in self.categories if not self._category_has_sharing(c.name)]
         if not non_shareable_cats:
             return reserved
 
@@ -871,10 +930,10 @@ class UnifiedOptimizer:
             orbs_by_type[orb.type].append(orb)
 
         def slots_needed(cat: Category) -> int:
-            return cat.slots if cat.name in self.shareable else cat.slots * len(self.P.profiles)
+            return cat.slots if self._category_has_sharing(cat.name) else cat.slots * len(self.P.profiles)
 
         total_slots = sum(slots_needed(c) for c in non_shareable_cats)
-        shareable_slots = sum(slots_needed(c) for c in self.categories if c.name in self.shareable)
+        shareable_slots = sum(slots_needed(c) for c in self.categories if self._category_has_sharing(c.name))
         reserve_ratio = (
             min(0.5, total_slots / (total_slots + shareable_slots))
             if (total_slots + shareable_slots)
@@ -884,7 +943,7 @@ class UnifiedOptimizer:
         sorted_by_type = {
             t: sorted(
                 orbs,
-                key=lambda o: float(o.value) + (_tiers_from_level(_effective_level(o)) * 0.1),
+                key=lambda o: float(o.value) + (_tiers_from_level(base_orb_level(o)) * 0.1),
                 reverse=True,
             )
             for t, orbs in orbs_by_type.items()
@@ -923,7 +982,7 @@ class UnifiedOptimizer:
 
     def _can_use_orb(self, orb: Orb, category: Category) -> bool:
         """Check if an orb can be used in this category based on reservations."""
-        if category.name in self.shareable:
+        if self._category_has_sharing(category.name):
             for cat_name, cat_reserves in self.reserved_orbs.items():
                 if orb in cat_reserves.get(orb.type, []):
                     return False
@@ -939,6 +998,6 @@ class UnifiedOptimizer:
 
     def _branching_size(self, cat: Category) -> int:
         total = len(self._valid_combos_by_cat[cat.name])
-        if cat.name in self.shareable:
+        if self._category_has_sharing(cat.name):
             return total
         return total * len(self.P.profiles)

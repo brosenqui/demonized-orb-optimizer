@@ -1,7 +1,7 @@
 # orb_optimizer/io/parsers.py
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Mapping, Tuple, TYPE_CHECKING
 
 from ..models import Orb, Category
 from ..utils import parse_value
@@ -73,21 +73,48 @@ def parse_categories(data: Any) -> List[Category]:
     return cats
 
 
-def parse_profiles_header(data: Any) -> Tuple[List[dict], List[str] | None]:
-    """Light validation for profiles payload; returns (profiles_list, shareable?)."""
+def _validate_shareability_matrix(value: Any) -> Mapping[str, Mapping[str, bool]]:
+    if not isinstance(value, dict):
+        raise TypeError("shareability_matrix must be an object mapping category -> profile -> boolean")
+    for category, row in value.items():
+        if not isinstance(category, str):
+            raise TypeError("shareability_matrix category keys must be strings")
+        if not isinstance(row, dict):
+            raise TypeError(
+                f"shareability_matrix[{category!r}] must be an object mapping profile -> boolean"
+            )
+        for profile_name, enabled in row.items():
+            if not isinstance(profile_name, str):
+                raise TypeError("shareability_matrix profile keys must be strings")
+            if not isinstance(enabled, bool):
+                raise TypeError(
+                    f"shareability_matrix[{category!r}][{profile_name!r}] must be a boolean"
+                )
+    return value
+
+
+def parse_profiles_header(data: Any) -> Tuple[List[dict], Mapping[str, Mapping[str, bool]] | List[str] | None]:
+    """Light validation for profiles payload; returns (profiles_list, shareability payload)."""
     if isinstance(data, dict) and "profiles" in data:
         profiles = data["profiles"]
-        shareable = data.get("shareable_categories")
+        shareability_matrix = data.get("shareability_matrix")
+        legacy_shareable = data.get("shareable_categories")
     else:
         profiles = data
-        shareable = None
+        shareability_matrix = None
+        legacy_shareable = None
 
     if not isinstance(profiles, list):
         raise TypeError("profiles must be a list")
     for i, p in enumerate(profiles):
         if not isinstance(p, dict):
             raise TypeError(f"profiles[{i}] must be an object")
-    if shareable is not None:
-        if not isinstance(shareable, list) or not all(isinstance(s, str) for s in shareable):
+    if shareability_matrix is not None:
+        return profiles, _validate_shareability_matrix(shareability_matrix)
+
+    if legacy_shareable is not None:
+        if not isinstance(legacy_shareable, list) or not all(isinstance(s, str) for s in legacy_shareable):
             raise TypeError("shareable_categories must be a list of strings")
-    return profiles, shareable
+        return profiles, legacy_shareable
+
+    return profiles, None

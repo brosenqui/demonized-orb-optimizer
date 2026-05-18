@@ -8,7 +8,7 @@ Optional (with built-in defaults):
   - set_priority.json      : set -> priority weight (bigger = more important)
   - orb_weights.json       : orb type -> multiplier
   - orb_levels.json        : { "max_levels_by_rarity": { "Legendary": 9, ... } }
-  - orb_level_weights.json : orb type -> additive points per tier (3/6/9)
+  - orb_level_weights.json : orb type -> multiplier for level-gate bonuses (3/6/9)
 
 Notes:
 Paths are provided by CLI. Optional files fall back to defaults.

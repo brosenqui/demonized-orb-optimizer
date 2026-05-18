@@ -1,4 +1,5 @@
-import type { CategoryRarity, OptimizeProfileIn } from "@/lib/types";
+import { CATEGORIES } from "@/lib/categoryData";
+import type { CategoryRarity, OptimizeProfileIn, ShareabilityMatrix } from "@/lib/types";
 
 export function sanitizeNumber(value: number, fallback = 0): number {
   if (!Number.isFinite(value)) return fallback;
@@ -19,36 +20,119 @@ export function withCategoryRarity(
   return { ...profile, categories: current };
 }
 
+export function normalizeShareabilityMatrix(
+  profiles: OptimizeProfileIn[],
+  matrix: ShareabilityMatrix | null | undefined
+): ShareabilityMatrix {
+  const normalized: ShareabilityMatrix = {};
+  for (const category of CATEGORIES) {
+    const row = matrix?.[category] ?? {};
+    normalized[category] = {};
+    for (const profile of profiles) {
+      normalized[category][profile.name] = Boolean(row[profile.name]);
+    }
+  }
+  return normalized;
+}
+
+export function shareabilityMatrixFromLegacy(
+  profiles: OptimizeProfileIn[],
+  shareableCategories: readonly string[] | null | undefined
+): ShareabilityMatrix {
+  const selected = new Set((shareableCategories ?? []).map((category) => String(category)));
+  const matrix: ShareabilityMatrix = {};
+  for (const category of CATEGORIES) {
+    matrix[category] = {};
+    for (const profile of profiles) {
+      matrix[category][profile.name] = selected.has(category);
+    }
+  }
+  return matrix;
+}
+
+export function renameProfileInShareabilityMatrix(
+  matrix: ShareabilityMatrix,
+  previousName: string,
+  nextName: string
+): ShareabilityMatrix {
+  if (!previousName || !nextName || previousName === nextName) return matrix;
+  const updated: ShareabilityMatrix = {};
+  for (const [category, row] of Object.entries(matrix)) {
+    const nextRow: Record<string, boolean> = {};
+    for (const [profileName, enabled] of Object.entries(row)) {
+      if (profileName === previousName) {
+        nextRow[nextName] = enabled;
+      } else {
+        nextRow[profileName] = enabled;
+      }
+    }
+    updated[category] = nextRow;
+  }
+  return updated;
+}
+
 export function propagateCategoryRarity(
   profiles: OptimizeProfileIn[],
   targetIndex: number,
   category: string,
   rarity: CategoryRarity | "",
-  shareable: string[]
+  matrix: ShareabilityMatrix
 ): OptimizeProfileIn[] {
   const updated = profiles.map((profile, index) =>
     index === targetIndex ? withCategoryRarity(profile, category, rarity) : profile
   );
+  const sourceProfile = updated[targetIndex];
+  if (!sourceProfile) return updated;
+  if (!matrix?.[category]?.[sourceProfile.name]) return updated;
 
-  if (!shareable.includes(category)) return updated;
-
-  return updated.map((profile) => withCategoryRarity(profile, category, rarity));
+  return updated.map((profile, index) => {
+    if (index === targetIndex) return profile;
+    if (!matrix?.[category]?.[profile.name]) return profile;
+    return withCategoryRarity(profile, category, rarity);
+  });
 }
 
-export function synchronizeShareableCategories(
+export function synchronizeCategoryRarityWithMatrix(
   profiles: OptimizeProfileIn[],
-  shareable: readonly string[]
+  matrix: ShareabilityMatrix
 ): OptimizeProfileIn[] {
-  if (profiles.length <= 1 || shareable.length === 0) return profiles;
+  let nextProfiles = profiles;
+  let changed = false;
 
-  let next = [...profiles];
-  for (const category of shareable) {
-    const firstDefined = next
-      .map((profile) => profile.categories?.[category])
-      .find((value): value is CategoryRarity => value !== undefined);
+  for (const category of CATEGORIES) {
+    const enabledIndexes: number[] = [];
+    for (let index = 0; index < nextProfiles.length; index += 1) {
+      const profile = nextProfiles[index];
+      if (matrix?.[category]?.[profile.name]) {
+        enabledIndexes.push(index);
+      }
+    }
 
-    if (!firstDefined) continue;
-    next = next.map((profile) => withCategoryRarity(profile, category, firstDefined));
+    if (enabledIndexes.length < 2) continue;
+
+    let canonicalRarity: CategoryRarity | undefined;
+    for (const index of enabledIndexes) {
+      const rarity = nextProfiles[index].categories?.[category];
+      if (rarity) {
+        canonicalRarity = rarity;
+        break;
+      }
+    }
+
+    if (!canonicalRarity) continue;
+
+    for (const index of enabledIndexes) {
+      const profile = nextProfiles[index];
+      if (profile.categories?.[category] === canonicalRarity) continue;
+
+      if (!changed) {
+        nextProfiles = [...nextProfiles];
+        changed = true;
+      }
+
+      nextProfiles[index] = withCategoryRarity(profile, category, canonicalRarity);
+    }
   }
-  return next;
+
+  return nextProfiles;
 }

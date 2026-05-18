@@ -14,6 +14,7 @@ import sys
 from typing import Any, TYPE_CHECKING
 
 from .models import ProfileConfig, Category
+from .shareability import matrix_from_shareable_categories, normalize_shareability_matrix
 
 if TYPE_CHECKING:
     from .data_loader import DataLoader
@@ -108,7 +109,7 @@ def build_profiles_from_json(
     path: str,
     *,
     default_slots: dict[str, int] | None = None,
-) -> tuple[list[ProfileConfig], list[str]]:
+) -> tuple[list[ProfileConfig], dict[str, dict[str, bool]]]:
     """Read profiles.json and convert to ProfileConfig list WITH categories attached.
 
     Supports per-profile:
@@ -161,8 +162,32 @@ def build_profiles_from_json(
             )
         )
 
-    shareable = list(cfg.get("shareable_categories", []))
-    return out, shareable
+    categories = sorted(
+        {
+            category.name
+            for profile in out
+            for category in (profile.categories or [])
+        }
+    )
+    profile_names = [profile.name for profile in out]
+    if len(set(profile_names)) != len(profile_names):
+        raise ValueError("Profile names must be unique for shareability_matrix keys.")
+
+    raw_matrix = cfg.get("shareability_matrix")
+    if raw_matrix is not None:
+        matrix = normalize_shareability_matrix(
+            categories=categories,
+            profile_names=profile_names,
+            shareability_matrix=raw_matrix,
+            strict=True,
+        )
+    else:
+        matrix = matrix_from_shareable_categories(
+            categories=categories,
+            profile_names=profile_names,
+            shareable_categories=cfg.get("shareable_categories", []),
+        )
+    return out, matrix
 
 
 def build_default_profile(

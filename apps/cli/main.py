@@ -51,7 +51,7 @@ from orb_optimizer.utils import (
     type=click.Path(dir_okay=False, readable=True, path_type=str),
     default=None,
     show_default=True,
-    help="Optional per-type orb-level weights (tier 3/6/9) (default profile only).",
+    help="Optional per-type multipliers for level-gate bonuses (3/6/9) (default profile only).",
 )
 # Default-profile knobs (ignored if profiles.json is provided)
 @click.option(
@@ -112,7 +112,7 @@ def cli(
 
     # Build profile(s) WITH categories
     if profiles:
-        profile_list, shareable = build_profiles_from_json(
+        profile_list, shareability_matrix = build_profiles_from_json(
             loader, profiles, default_slots=default_slots_map
         )
     else:
@@ -128,7 +128,7 @@ def cli(
                 default_slots=default_slots_map,
             )
         ]
-        shareable = None
+        shareability_matrix = None
 
     # Stash normalized inputs for all subcommands
     ctx.obj = {
@@ -137,7 +137,7 @@ def cli(
         "inputs": Inputs(
             orbs=orb_data,
             profiles=profile_list,                 # <-- categories now live inside each profile
-            shareable_categories=shareable,
+            shareability_matrix=shareability_matrix,
         ),
     }
 

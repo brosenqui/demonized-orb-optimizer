@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
 import Section from "@/components/ui/Section";
 import { HelpTooltip } from "@/components/ui/helpToolTip";
+import GateStatComparisonTable from "@/features/results/components/GateStatComparisonTable";
 import LoadoutStatTables from "@/features/results/components/LoadoutStatTables";
 import ProfileResults from "@/features/results/components/ProfileResults";
+import { sharedStatsForProfile } from "@/features/results/utils/resultStats";
 import { parseResultsFromRaw } from "@/lib/resultParser";
 import type { OptimizeResponse, OptimizeSummaryProfile } from "@/lib/types";
 
@@ -31,10 +32,6 @@ function summaryByName(
   summaryProfiles: readonly OptimizeSummaryProfile[]
 ): Record<string, OptimizeSummaryProfile> {
   return Object.fromEntries(summaryProfiles.map((profile) => [profile.name, profile]));
-}
-
-function sortedNumericEntries(values: Record<string, number>): Array<[string, number]> {
-  return Object.entries(values).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
 }
 
 function titleCase(value: string): string {
@@ -155,7 +152,7 @@ type ResultViewerProps = {
 };
 
 export default function ResultViewer({ data, loading, error }: ResultViewerProps) {
-  const [collapsedProfiles, setCollapsedProfiles] = useState<Record<string, boolean>>({});
+  const [selectedProfileIndex, setSelectedProfileIndex] = useState(0);
 
   if (loading) {
     return (
@@ -195,22 +192,20 @@ export default function ResultViewer({ data, loading, error }: ResultViewerProps
   const runDiagnostics = parsed.run_diagnostics && Object.keys(parsed.run_diagnostics).length > 0
     ? parsed.run_diagnostics
     : null;
-  const sharedSlotRows = parsed.shared_summary?.slots.length ?? 0;
-  const sharedSetKinds = parsed.shared_summary
-    ? Object.keys(parsed.shared_summary.active_sets).length
-    : 0;
-  const sharedTypeKinds = parsed.shared_summary
-    ? Object.keys(parsed.shared_summary.totals_by_type).length
-    : 0;
-  const hasSharedSummary =
-    !!parsed.shared_summary &&
-    (sharedSlotRows > 0 || sharedSetKinds > 0 || sharedTypeKinds > 0);
-  const sharedActiveSets = parsed.shared_summary
-    ? sortedNumericEntries(parsed.shared_summary.active_sets)
-    : [];
-  const sharedTypeTotals = parsed.shared_summary
-    ? sortedNumericEntries(parsed.shared_summary.totals_by_type)
-    : [];
+  const hasSharedSummary = (parsed.shared_summary?.slots.length ?? 0) > 0;
+  const safeSelectedProfileIndex =
+    selectedProfileIndex >= 0 && selectedProfileIndex < parsed.profiles.length
+      ? selectedProfileIndex
+      : 0;
+  const selectedProfile = parsed.profiles[safeSelectedProfileIndex];
+  const selectedSummary = summaries[selectedProfile.name];
+  const selectedSharedStats = sharedStatsForProfile(
+    selectedProfile.assignments,
+    parsed.shared_summary,
+    selectedProfile.name
+  );
+  const hasSelectedSharedSlots = selectedSharedStats.shared_slot_count > 0;
+  const selectedProfilePanelId = `result-profile-panel-${safeSelectedProfileIndex}`;
 
   return (
     <Section title="Results">
@@ -219,73 +214,125 @@ export default function ResultViewer({ data, loading, error }: ResultViewerProps
           Combined Score: <span className="font-mono">{rounded(parsed.combined_score)}</span>
         </div>
       )}
-      {hasSharedSummary && parsed.shared_summary && (
-        <details className="mb-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4" open>
-          <summary className="cursor-pointer select-none text-base font-semibold text-zinc-700">
-            Shared Slot Summary
-          </summary>
-          <div className="mt-3 space-y-3">
-            <LoadoutStatTables
-              activeSets={sharedActiveSets}
-              typeTotals={sharedTypeTotals}
-              activeSetsTitle="Shared Active Sets"
-              typeTotalsTitle="Shared Totals by Type"
-              layout="columns"
-            />
-          </div>
-        </details>
-      )}
+      <div className="space-y-4">
+        <div
+          className="flex flex-wrap gap-2"
+          role="tablist"
+          aria-label="Result profiles"
+        >
+          {parsed.profiles.map((profile, index) => {
+            const isActive = index === safeSelectedProfileIndex;
+            return (
+              <button
+                key={`${profile.name}-${index}`}
+                role="tab"
+                id={`result-profile-tab-${index}`}
+                aria-selected={isActive}
+                aria-controls={`result-profile-panel-${index}`}
+                tabIndex={isActive ? 0 : -1}
+                type="button"
+                onClick={() => setSelectedProfileIndex(index)}
+                className={[
+                  "rounded-full border px-3 py-1.5 text-sm transition",
+                  isActive
+                    ? "border-zinc-800 bg-zinc-800 text-white"
+                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100",
+                ].join(" ")}
+              >
+                {profile.name}
+              </button>
+            );
+          })}
+        </div>
 
-      <div className="space-y-8">
-        {parsed.profiles.map((profile, index) => {
-          const summary = summaries[profile.name];
-          const profileKey = `${profile.name}-${index}`;
-          const isCollapsed = collapsedProfiles[profileKey] ?? false;
-          return (
-            <div
-              key={profileKey}
-              className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-semibold">Profile: {profile.name}</h3>
-                  {profile.is_partial && (
-                    <span className="text-xs text-zinc-500">Partial assignment</span>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <SummaryChip label="Total" value={summary?.score ?? profile.score} />
-                  <SummaryChip label="Sets" value={summary?.set_score ?? profile.set_score} />
-                  <SummaryChip label="Orbs" value={summary?.orb_score ?? profile.orb_score} />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setCollapsedProfiles((current) => ({
-                        ...current,
-                        [profileKey]: !isCollapsed,
-                      }))
-                    }
-                    aria-expanded={!isCollapsed}
-                    aria-label={isCollapsed ? `Expand profile ${profile.name}` : `Collapse profile ${profile.name}`}
-                    title={isCollapsed ? `Expand profile ${profile.name}` : `Collapse profile ${profile.name}`}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100"
-                  >
-                    {isCollapsed ? (
-                      <ChevronDown className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <ChevronUp className="h-4 w-4" aria-hidden="true" />
-                    )}
-                  </button>
-                </div>
-              </div>
-              {!isCollapsed && (
-                <div className="mt-3">
-                  <ProfileResults assignments={profile.assignments} />
-                </div>
+        <div
+          role="tabpanel"
+          id={selectedProfilePanelId}
+          aria-labelledby={`result-profile-tab-${safeSelectedProfileIndex}`}
+          className="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm backdrop-blur"
+        >
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold">Profile: {selectedProfile.name}</h3>
+              {selectedProfile.is_partial && (
+                <span className="text-xs text-zinc-500">Partial assignment</span>
               )}
             </div>
-          );
-        })}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <SummaryChip label="Total" value={selectedSummary?.score ?? selectedProfile.score} />
+              <SummaryChip label="Sets" value={selectedSummary?.set_score ?? selectedProfile.set_score} />
+              <SummaryChip label="Orbs" value={selectedSummary?.orb_score ?? selectedProfile.orb_score} />
+            </div>
+          </div>
+          <details className="mb-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4" open>
+            <summary className="cursor-pointer select-none text-base font-semibold text-zinc-700">
+              Stat Breakdown (Shared + Profile-only)
+            </summary>
+            <div className="mt-3 space-y-4">
+              <div className="grid gap-2 text-xs text-zinc-600 sm:grid-cols-2">
+                <div className="flex items-center gap-1">
+                  <span>Shared Slots:</span>
+                  <HelpTooltip text="How many slot assignments in this profile are shared with one or more other profiles." />
+                  <span className="font-mono">{selectedSharedStats.shared_slot_count}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span>Profile-only Slots:</span>
+                  <HelpTooltip text="How many slot assignments are unique to this profile and not shared with others." />
+                  <span className="font-mono">{selectedSharedStats.specific_slot_count}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span>Shared Value:</span>
+                  <HelpTooltip text="Total orb value contributed by shared slot assignments for this profile." />
+                  <span className="font-mono">{rounded(selectedSharedStats.shared_total_value)}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span>Profile-only Value:</span>
+                  <HelpTooltip text="Total orb value contributed by this profile's non-shared slot assignments." />
+                  <span className="font-mono">{rounded(selectedSharedStats.specific_total_value)}</span>
+                </div>
+                {hasSelectedSharedSlots && (
+                  <>
+                    <div className="flex items-center gap-1">
+                      <span>Shared With:</span>
+                      <HelpTooltip text="How often this profile shares with each other profile across shared slot rows." />
+                      <span className="font-mono">
+                        {selectedSharedStats.shared_with.length > 0
+                          ? selectedSharedStats.shared_with
+                              .map(([name, count]) => `${name}=${count}`)
+                              .join(", ")
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span>Compromise Loss:</span>
+                      <HelpTooltip text="Estimated score tradeoff for this profile caused by enforcing shared choices instead of that profile's solo-best legal choice." />
+                      <span className="font-mono">{rounded(selectedSharedStats.compromise_loss)}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span>Cap-limited Shared Slots:</span>
+                      <HelpTooltip text="Shared slots where this profile's preferred legal choice was blocked by set-piece cap constraints." />
+                      <span className="font-mono">{selectedSharedStats.cap_limited_slots}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <LoadoutStatTables
+                  sharedActiveSets={selectedSharedStats.shared_active_sets}
+                  specificActiveSets={selectedSharedStats.specific_active_sets}
+                  sharedTypeTotals={selectedSharedStats.shared_totals_by_type}
+                  specificTypeTotals={selectedSharedStats.specific_totals_by_type}
+                />
+                <GateStatComparisonTable
+                  sharedStats={selectedSharedStats.shared_level_gate_stats}
+                  specificStats={selectedSharedStats.specific_level_gate_stats}
+                />
+              </div>
+            </div>
+          </details>
+          <ProfileResults assignments={selectedProfile.assignments} />
+        </div>
       </div>
 
       {(hasSharedSummary || runDiagnostics) && (

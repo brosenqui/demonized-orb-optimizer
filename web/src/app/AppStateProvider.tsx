@@ -17,33 +17,42 @@ import type {
   OptimizeRequest,
   OptimizeResponse,
   OrbIn,
+  ShareabilityMatrix,
 } from "@/lib/types";
 import { orbsReducer, initialOrbsState } from "@/features/orbs/orbsReducer";
 import { initialProfilesState, profilesReducer } from "@/features/profiles/profilesReducer";
+import {
+  normalizeShareabilityMatrix,
+  shareabilityMatrixFromLegacy,
+} from "@/features/profiles/utils/profileHelpers";
 import { initialRunState, runReducer } from "./runReducer";
 
 export type SavedState = {
   orbs: OrbIn[];
   profiles: OptimizeProfileIn[];
-  shareable: string[];
+  shareability_matrix: ShareabilityMatrix;
+  shareable?: string[];
 };
 
 const savedStateSchema = z.object({
   orbs: z.array(orbInSchema).default([]),
   profiles: z.array(optimizeProfileInSchema).default([]),
-  shareable: z.array(z.string()).default([]),
+  shareability_matrix: z
+    .record(z.string(), z.record(z.string(), z.boolean()))
+    .optional(),
+  shareable: z.array(z.string()).optional(),
 });
 
 type AppStateContextValue = {
   orbs: OrbIn[];
   profiles: OptimizeProfileIn[];
-  shareable: string[];
+  shareabilityMatrix: ShareabilityMatrix;
   loading: boolean;
   error: string | null;
   result: OptimizeResponse | null;
   payload: OptimizeRequest;
   setOrbs: (orbs: OrbIn[]) => void;
-  setShareable: (shareable: string[]) => void;
+  setShareabilityMatrix: (shareabilityMatrix: ShareabilityMatrix) => void;
   addProfile: () => void;
   updateProfile: (index: number, profile: OptimizeProfileIn) => void;
   removeProfile: (index: number) => void;
@@ -73,23 +82,44 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
 
     const restored = parsed.data;
+    const migratedMatrix = restored.shareability_matrix
+      ? normalizeShareabilityMatrix(restored.profiles, restored.shareability_matrix)
+      : shareabilityMatrixFromLegacy(restored.profiles, restored.shareable);
     orbsDispatch({ type: "hydrate", orbs: restored.orbs });
     profilesDispatch({
       type: "hydrate",
       profiles: restored.profiles,
-      shareable: restored.shareable,
+      shareabilityMatrix: migratedMatrix,
     });
     toast.success("Restored your saved setup.");
   }, []);
 
   const payload = useMemo<OptimizeRequest>(
-    () => ({
-      orbs: orbsState.orbs,
-      profiles: profilesState.profiles,
-      shareable_categories: profilesState.shareable,
-      algorithm: "greedy",
-    }),
-    [orbsState.orbs, profilesState.profiles, profilesState.shareable]
+    () => {
+      const categoriesInProfiles = new Set<string>();
+      for (const profile of profilesState.profiles) {
+        for (const category of Object.keys(profile.categories ?? {})) {
+          categoriesInProfiles.add(category);
+        }
+      }
+
+      const matrixForPayload: ShareabilityMatrix = {};
+      for (const category of categoriesInProfiles) {
+        const row: Record<string, boolean> = {};
+        for (const profile of profilesState.profiles) {
+          row[profile.name] = Boolean(profilesState.shareabilityMatrix?.[category]?.[profile.name]);
+        }
+        matrixForPayload[category] = row;
+      }
+
+      return {
+        orbs: orbsState.orbs,
+        profiles: profilesState.profiles,
+        shareability_matrix: matrixForPayload,
+        algorithm: "greedy",
+      };
+    },
+    [orbsState.orbs, profilesState.profiles, profilesState.shareabilityMatrix]
   );
 
   const runOptimize = useCallback(async () => {
@@ -120,12 +150,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const ok = saveState<SavedState>({
       orbs: orbsState.orbs,
       profiles: profilesState.profiles,
-      shareable: profilesState.shareable,
+      shareability_matrix: profilesState.shareabilityMatrix,
     });
 
     if (ok) toast.success("Saved your setup.");
     else toast.error("Could not save (localStorage error).");
-  }, [orbsState.orbs, profilesState.profiles, profilesState.shareable]);
+  }, [orbsState.orbs, profilesState.profiles, profilesState.shareabilityMatrix]);
 
   const clearSavedSetup = useCallback(() => {
     clearState();
@@ -138,7 +168,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         {
           orbs: orbsState.orbs,
           profiles: profilesState.profiles,
-          shareable: profilesState.shareable,
+          shareability_matrix: profilesState.shareabilityMatrix,
         },
         null,
         2
@@ -149,14 +179,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const message = error instanceof Error ? error.message : "Clipboard unavailable";
       toast.error(`Copy failed: ${message}`);
     }
-  }, [orbsState.orbs, profilesState.profiles, profilesState.shareable]);
+  }, [orbsState.orbs, profilesState.profiles, profilesState.shareabilityMatrix]);
 
   const setOrbs = useCallback((orbs: OrbIn[]) => {
     orbsDispatch({ type: "replace", orbs });
   }, []);
 
-  const setShareable = useCallback((shareable: string[]) => {
-    profilesDispatch({ type: "set_shareable", shareable });
+  const setShareabilityMatrix = useCallback((shareabilityMatrix: ShareabilityMatrix) => {
+    profilesDispatch({ type: "set_shareability_matrix", shareabilityMatrix });
   }, []);
 
   const addProfile = useCallback(() => {
@@ -182,13 +212,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     () => ({
       orbs: orbsState.orbs,
       profiles: profilesState.profiles,
-      shareable: profilesState.shareable,
+      shareabilityMatrix: profilesState.shareabilityMatrix,
       loading: runState.loading,
       error: runState.error,
       result: runState.result,
       payload,
       setOrbs,
-      setShareable,
+      setShareabilityMatrix,
       addProfile,
       updateProfile,
       removeProfile,
@@ -203,14 +233,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       orbsState.orbs,
       payload,
       profilesState.profiles,
-      profilesState.shareable,
+      profilesState.shareabilityMatrix,
       removeProfile,
       runState.error,
       runState.loading,
       runState.result,
       setOrbs,
       setProfileCategory,
-      setShareable,
+      setShareabilityMatrix,
       updateProfile,
       copySetupJson,
       clearSavedSetup,

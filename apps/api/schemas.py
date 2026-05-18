@@ -94,7 +94,7 @@ class OptimizeProfileIn(BaseModel):
 class OptimizeRequest(BaseModel):
     orbs: List[OrbIn]
     profiles: List[OptimizeProfileIn]
-    shareable_categories: Optional[List[str]] = None
+    shareability_matrix: Optional[Dict[str, Dict[str, bool]]] = None
     algorithm: Literal["greedy"] = "greedy"  # web app supports greedy only
 
 class OptimizeResult(BaseModel):
